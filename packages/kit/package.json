@@ -1,0 +1,21 @@
+{
+  "name": "@q/kit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Elm architecture on Effect: typed messages, pure update, commands as data, model-gated subscriptions.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./solid": "./src/solid.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.112"
+  },
+  "peerDependencies": {
+    "solid-js": "1.9.12"
+  },
+  "peerDependenciesMeta": {
+    "solid-js": { "optional": true }
+  }
+}

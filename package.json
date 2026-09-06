@@ -1,8 +1,17 @@
 {
-  "name": "q",
-  "module": "index.ts",
-  "type": "module",
+  "name": "q-workspace",
   "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "start": "bun apps/q/index.tsx",
+    "build": "bun apps/q/build.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

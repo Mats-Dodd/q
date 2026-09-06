@@ -1,0 +1,9 @@
+# Running a .tsx entry directly needs the Solid transform; apps/q has its own bunfig for `bun start` there.
+preload = ["@opentui/solid/preload"]
+
+[install]
+# One node_modules at the root: a single tsconfig and the test preload below resolve everything.
+linker = "hoisted"
+
+[test]
+preload = ["@opentui/solid/preload"]

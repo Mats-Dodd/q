@@ -1,0 +1,14 @@
+{
+  "name": "@q/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The q agent program: model, messages, transcript events, services, update and subscriptions. Headless.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@q/kit": "workspace:*",
+    "effect": "4.0.0-rc.112"
+  }
+}

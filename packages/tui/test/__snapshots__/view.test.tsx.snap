@@ -1,0 +1,14 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`view typing a prompt and pressing Enter echoes it back 1`] = `
+" you › hello
+ q › hello
+
+
+
+ Enter sends · Esc cancels · Ctrl+C
+╭──────────────────────────────────────╮
+│ Type a message…                      │
+╰──────────────────────────────────────╯
+"
+`;

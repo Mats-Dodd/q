@@ -1,0 +1,18 @@
+{
+  "name": "@q/tui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The terminal view over @q/core, on OpenTUI with Solid.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@opentui/core": "0.5.10",
+    "@opentui/solid": "0.5.10",
+    "@q/core": "workspace:*",
+    "@q/kit": "workspace:*",
+    "effect": "4.0.0-rc.112",
+    "solid-js": "1.9.12"
+  }
+}
