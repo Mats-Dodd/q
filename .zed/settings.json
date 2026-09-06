@@ -1,0 +1,30 @@
+{
+  "auto_install_extensions": {
+    "tsgo": true
+  },
+  "languages": {
+    "TypeScript": {
+      "language_servers": [
+        "tsgo",
+        "!vtsls",
+        "!typescript-language-server",
+        "..."
+      ]
+    },
+    "TSX": {
+      "language_servers": [
+        "tsgo",
+        "!vtsls",
+        "!typescript-language-server",
+        "..."
+      ]
+    }
+  },
+  "lsp": {
+    "tsgo": {
+      "settings": {
+        "package_version": "7.0.2"
+      }
+    }
+  }
+}
