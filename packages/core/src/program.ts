@@ -1,11 +1,11 @@
 import { Effect } from "effect"
 
 import type { Program } from "@q/kit"
-import type { Agent } from "./agent"
+import type { Model } from "./domain/model"
 import type { Message } from "./message"
-import type { Model } from "./model"
+import type { Agent } from "./services/agent"
+import { Transcript } from "./services/transcript"
 import { AgentTurn } from "./subscription"
-import { Transcript } from "./transcript"
 import { type Flags, init, update } from "./update"
 
 // PROGRAM — the whole agent, headless. Front ends and tests take it from here; the binary picks the Layers.

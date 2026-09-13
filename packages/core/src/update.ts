@@ -2,9 +2,10 @@ import { Array, Option, Struct } from "effect"
 
 import type { Program } from "@q/kit"
 import { AcceptPrompt, CommitTurn } from "./command"
+import { ConversationEvent, Outcome } from "./domain/event"
+import { type ChatMessage, type Model, Turn } from "./domain/model"
 import { Message } from "./message"
-import { type ChatMessage, type Model, Turn } from "./model"
-import { ConversationEvent, Outcome, type Transcript } from "./transcript"
+import type { Transcript } from "./services/transcript"
 
 type Return = Program.Return<Model, Message, Transcript>
 

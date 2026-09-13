@@ -4,12 +4,13 @@ import { TestClock } from "effect/testing"
 
 import { Program, Runtime } from "@q/kit"
 import { settle, tick } from "@q/kit/testing"
-import { Agent, AgentError, makeEchoAgent } from "../src/agent"
-import { program } from "../src/program"
+import { ConversationEvent, Outcome } from "../src/domain/event"
+import { type Model, Turn } from "../src/domain/model"
 import { Message } from "../src/message"
-import { type Model, Turn } from "../src/model"
+import { program } from "../src/program"
+import { Agent, AgentError, makeEchoAgent } from "../src/services/agent"
+import { Transcript, TranscriptError, makeInMemoryTranscript } from "../src/services/transcript"
 import { coalesce } from "../src/subscription"
-import { ConversationEvent, Outcome, Transcript, TranscriptError, makeInMemoryTranscript } from "../src/transcript"
 import { init } from "../src/update"
 
 type Services = Agent | Transcript | Scope.Scope | TestClock.TestClock

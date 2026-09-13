@@ -1,22 +1,8 @@
-import { Array, Context, Data, Effect, Layer, Ref, Schema } from "effect"
+import { Array, Context, Data, Effect, Layer, Ref } from "effect"
 
-import { defineTaggedUnion } from "@q/kit"
+import type { ConversationEvent } from "../domain/event"
 
-// TRANSCRIPT — the durable truth of the conversation.
-// Domain events at turn granularity. Never transport chunks. Schema-validated at this boundary.
-
-export const Outcome = defineTaggedUnion({
-  Completed: {},
-  Cancelled: {},
-  Failed: { error: Schema.String },
-})
-export type Outcome = typeof Outcome.Type
-
-export const ConversationEvent = defineTaggedUnion({
-  PromptAccepted: { prompt: Schema.String },
-  TurnEnded: { text: Schema.String, outcome: Outcome },
-})
-export type ConversationEvent = typeof ConversationEvent.Type
+// TRANSCRIPT — append-only storage for the conversation events. Schema-validated at this boundary.
 
 export class TranscriptError extends Data.TaggedError("TranscriptError")<{ readonly message: string }> {}
 

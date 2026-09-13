@@ -4,9 +4,9 @@ import { Option } from "effect"
 import { Program } from "@q/kit"
 import { expectCommands, expectNoCommands, given, meanwhile, message, model, resolve, story } from "@q/kit/testing"
 import { AcceptPrompt, CommitTurn } from "../src/command"
+import { ConversationEvent, Outcome } from "../src/domain/event"
+import { type Model, Turn } from "../src/domain/model"
 import { Message } from "../src/message"
-import { type Model, Turn } from "../src/model"
-import { ConversationEvent, Outcome } from "../src/transcript"
 import { init, update } from "../src/update"
 
 const fresh = () => init({ events: [] }).model

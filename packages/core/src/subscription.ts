@@ -1,9 +1,9 @@
 import { Effect, Option, Schema, Stream } from "effect"
 
 import { Subscription } from "@q/kit"
-import { Agent } from "./agent"
+import { type Model, Turn } from "./domain/model"
 import { Message } from "./message"
-import { type Model, Turn } from "./model"
+import { Agent } from "./services/agent"
 
 // SUBSCRIPTION
 

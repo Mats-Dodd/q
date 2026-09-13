@@ -35,8 +35,10 @@ one root `tsc --noEmit` checks everything. The boundaries are the seams:
 ```
 packages/kit    @q/kit          the runtime; knows no domain. `@q/kit/solid` is the Solid bridge,
                                 `@q/kit/testing` the story DSL and scheduler helpers.
-packages/core   @q/core         the agent program, headless: model, messages, transcript events,
-                                service tags with in-memory Layers, update, subscriptions.
+packages/core   @q/core         the agent program, headless. `src/domain` holds the model and the
+                                transcript events (pure schemas); `src/services` the Agent and
+                                Transcript tags with in-memory Layers; the root the TEA program:
+                                messages, commands, update, subscriptions.
 packages/tui    @q/tui          the OpenTUI + Solid view over a core program.
 apps/q          q               the binary. Composition root: picks the Layers, renders, compiles.
 ```

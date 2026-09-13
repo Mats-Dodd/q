@@ -1,8 +1,9 @@
 import { Effect } from "effect"
 
 import { Command } from "@q/kit"
+import { ConversationEvent, type Outcome } from "./domain/event"
 import { Message } from "./message"
-import { ConversationEvent, type Outcome, Transcript } from "./transcript"
+import { Transcript } from "./services/transcript"
 
 // COMMAND — one-shot effects, described in `update`, run by the runtime. Failures become Messages.
 
