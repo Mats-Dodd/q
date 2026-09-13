@@ -29,6 +29,10 @@
   "include": [
     "packages/*/src",
     "packages/*/test",
-    "apps/*"
+    "apps/*/**/*"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/dist"
   ]
 }

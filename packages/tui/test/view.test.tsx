@@ -1,14 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Effect, Layer } from "effect"
 
-import { InMemoryTranscript, Transcript, makeEchoAgent } from "@q/core"
+import { Resume, SessionTranscript, SqlTranscriptRepository, Transcript, makeEchoAgent } from "@q/core"
 
 import { App } from "../src/view"
 
 const trim = (frame: string) => frame.split("\n").map((line) => line.trimEnd()).join("\n")
 
-const mount = (delay: Parameters<typeof makeEchoAgent>[0], transcript: Layer.Layer<Transcript> = InMemoryTranscript) =>
+/** The real transcript on a throwaway database. */
+const sqlite = SessionTranscript(Resume.New(), "/test").pipe(
+  Layer.provide(SqlTranscriptRepository),
+  Layer.provide(SqliteClient.layer({ filename: ":memory:" })),
+)
+
+const mount = (delay: Parameters<typeof makeEchoAgent>[0], transcript: Layer.Layer<Transcript, unknown> = sqlite) =>
   testRender(() => <App layer={Layer.mergeAll(makeEchoAgent(delay), transcript)} />, {
     width: 40,
     height: 9,

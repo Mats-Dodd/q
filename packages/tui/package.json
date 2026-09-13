@@ -14,5 +14,8 @@
     "@q/kit": "workspace:*",
     "effect": "4.0.0-rc.112",
     "solid-js": "1.9.12"
+  },
+  "devDependencies": {
+    "@effect/sql-sqlite-bun": "4.0.0-rc.112"
   }
 }

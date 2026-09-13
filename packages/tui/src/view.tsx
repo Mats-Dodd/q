@@ -16,8 +16,8 @@ const colors = {
 
 const label: Record<Role, string> = { user: "you", assistant: "q" }
 
-/** The whole screen. The caller is the composition root and supplies the Layers. */
-export const App = (props: { layer: Layer.Layer<Agent | Transcript> }) => {
+/** The whole screen. The caller is the composition root and supplies the Layers. A Layer that fails to build shows as a crash. */
+export const App = (props: { layer: Layer.Layer<Agent | Transcript, unknown> }) => {
   const { app, crash } = createProgram(program, props.layer)
   return (
     <Show

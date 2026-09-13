@@ -27,18 +27,21 @@ export interface ProgramBoot<Model, Msg> {
  * exposed as a single signal rather than a store: Solid's `reconcile` mutates the previous object
  * graph in place, which would corrupt an immutable Model. With reference-preserving updates,
  * `select` and `<Index>` give the same fine-grained leaf updates without mutation.
+ *
+ * A Layer that fails to build (a database that will not open, a session that does not exist) is
+ * a crash like any other: `crash` is set and `app` stays undefined.
  */
-export const createProgram = <Model, Msg, R, Flags>(
+export const createProgram = <Model, Msg, R, E, Flags>(
   program: Program<Model, Msg, R, Flags>,
-  layer: Layer.Layer<R>,
+  layer: Layer.Layer<R, E>,
 ): ProgramBoot<Model, Msg> => {
   const managed = ManagedRuntime.make(layer)
   const scope = Scope.makeUnsafe()
   const [crash, setCrash] = createSignal<Cause.Cause<unknown>>()
   let setModel: ((model: Model) => void) | undefined
 
-  const [app] = createResource(async (): Promise<SolidProgram<Model, Msg>> => {
-    const runtime = await managed.runPromise(
+  const [app] = createResource(async (): Promise<SolidProgram<Model, Msg> | undefined> => {
+    const exit = await managed.runPromiseExit(
       Runtime.make(program, {
         batch,
         onModel: (model) => setModel?.(model),
@@ -49,6 +52,12 @@ export const createProgram = <Model, Msg, R, Flags>(
         },
       }).pipe(Scope.provide(scope)),
     )
+    if (Exit.isFailure(exit)) {
+      console.error(Cause.pretty(exit.cause))
+      setCrash(() => exit.cause)
+      return undefined
+    }
+    const runtime = exit.value
     const [model, set] = createSignal<Model>(runtime.model())
     setModel = (next) => set(() => next)
     const select = <Value,>(project: (model: Model) => Value) => createMemo(() => project(model()))

@@ -10,5 +10,8 @@
   "dependencies": {
     "@q/kit": "workspace:*",
     "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "@effect/sql-sqlite-bun": "4.0.0-rc.112"
   }
 }

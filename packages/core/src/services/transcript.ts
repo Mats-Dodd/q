@@ -1,18 +1,21 @@
-import { Array, Context, Data, Effect, Layer, Ref } from "effect"
+import { Cause, Context, Effect, Layer, Semaphore } from "effect"
 
+import { defineTaggedUnion } from "@q/kit"
 import type { ConversationEvent } from "../domain/event"
+import { SessionId } from "../domain/session"
+import { TranscriptError, TranscriptRepository } from "./repository"
 
-// TRANSCRIPT — append-only storage for the conversation events. Schema-validated at this boundary.
+// TRANSCRIPT — append-only storage for one conversation. Schema-validated at this boundary.
 
-export class TranscriptError extends Data.TaggedError("TranscriptError")<{ readonly message: string }> {}
+export { TranscriptError }
 
 /**
- * Append-only storage for the conversation. In memory today; a file or a server later, same contract.
+ * Append-only storage for the conversation. One session; the Layer decides which.
  *
  * Contract: `append` calls land in the order they were issued. The program does not wait for one
  * append before issuing the next (a turn's `TurnEnded` and the next turn's `PromptAccepted` can be
  * in flight together), so a Layer with real latency must serialise appends itself, for example with
- * a semaphore of one permit or a queue. The in-memory Layer is synchronous and orders for free.
+ * a semaphore of one permit or a queue.
  */
 export class Transcript extends Context.Service<
   Transcript,
@@ -22,13 +25,47 @@ export class Transcript extends Context.Service<
   }
 >()("Transcript") {}
 
-export const makeInMemoryTranscript = (initial: ReadonlyArray<ConversationEvent> = []): Layer.Layer<Transcript> =>
+/** Which session a launch of `q` continues. Decided at the composition root, from the command line. */
+export const Resume = defineTaggedUnion({
+  /** Start a new session. */
+  New: {},
+  /** The latest session for the working directory, or a new one if there is none. */
+  Latest: {},
+  /** A specific session. Unknown ids fail the Layer. */
+  Session: { id: SessionId },
+})
+export type Resume = typeof Resume.Type
+
+/**
+ * The `Transcript` of one session, over the repository. Resolves the session when the Layer is
+ * built, then binds `append` and `load` to it. Appends go through one permit, per the contract.
+ */
+export const SessionTranscript = (
+  resume: Resume,
+  cwd: string,
+): Layer.Layer<Transcript, TranscriptError, TranscriptRepository> =>
   Layer.effect(
     Transcript,
-    Effect.map(Ref.make(initial), (events) => ({
-      append: (event) => Ref.update(events, Array.append(event)),
-      load: Ref.get(events),
-    })),
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository
+      const session = yield* Resume.match(resume, {
+        New: () => repository.createSession(cwd),
+        Latest: () =>
+          repository.sessions(cwd).pipe(
+            Effect.head,
+            Effect.catchTag("NoSuchElementError", () => repository.createSession(cwd)),
+          ),
+        Session: ({ id }) =>
+          repository.findSession(id).pipe(
+            Effect.catchTag("NoSuchElementError", () =>
+              Effect.fail(new TranscriptError({ cause: new Cause.NoSuchElementError(`no session ${id}`) })),
+            ),
+          ),
+      })
+      const permit = yield* Semaphore.make(1)
+      return {
+        append: (event) => permit.withPermits(1)(repository.append(session.id, event)),
+        load: repository.events(session.id),
+      }
+    }),
   )
-
-export const InMemoryTranscript = makeInMemoryTranscript()

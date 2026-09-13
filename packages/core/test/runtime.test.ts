@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Deferred, Effect, Fiber, Layer, Ref, type Scope, Semaphore, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -9,27 +10,31 @@ import { type Model, Turn } from "../src/domain/model"
 import { Message } from "../src/message"
 import { program } from "../src/program"
 import { Agent, AgentError, makeEchoAgent } from "../src/services/agent"
-import { Transcript, TranscriptError, makeInMemoryTranscript } from "../src/services/transcript"
+import { SqlTranscriptRepository } from "../src/services/repository"
+import { Resume, SessionTranscript, Transcript, TranscriptError } from "../src/services/transcript"
 import { coalesce } from "../src/subscription"
 import { init } from "../src/update"
 
 type Services = Agent | Transcript | Scope.Scope | TestClock.TestClock
 
-/** Run a scoped body with an echo agent and an in-memory transcript on a deterministic clock. */
+/** The real transcript on a throwaway database: one new session per test. */
+const sqlite = SessionTranscript(Resume.New(), "/test").pipe(
+  Layer.provide(SqlTranscriptRepository),
+  Layer.provide(SqliteClient.layer({ filename: ":memory:" })),
+)
+
+/** Run a scoped body with an echo agent and the SQLite transcript on a deterministic clock. */
 const run = <A>(
   body: Effect.Effect<A, never, Services>,
-  options: { agent?: Layer.Layer<Agent>; transcript?: Layer.Layer<Transcript> } = {},
+  options: { agent?: Layer.Layer<Agent>; transcript?: Layer.Layer<Transcript, unknown> } = {},
 ) =>
   Effect.runPromise(
     body.pipe(
       Effect.scoped,
       Effect.provide(
-        Layer.mergeAll(
-          options.agent ?? makeEchoAgent("10 millis"),
-          options.transcript ?? makeInMemoryTranscript(),
-          TestClock.layer(),
-        ),
+        Layer.mergeAll(options.agent ?? makeEchoAgent("10 millis"), options.transcript ?? sqlite, TestClock.layer()),
       ),
+      Effect.orDie,
     ),
   )
 
@@ -126,7 +131,7 @@ describe("program", () => {
 
   test("a transcript that refuses writes keeps the model clean and shows a notice", () => {
     const readOnly = Layer.succeed(Transcript, {
-      append: () => Effect.fail(new TranscriptError({ message: "read only" })),
+      append: () => Effect.fail(new TranscriptError({ cause: new Error("read only") })),
       load: Effect.succeed([]),
     })
     return run(
