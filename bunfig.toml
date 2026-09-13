@@ -2,8 +2,5 @@
 preload = ["@opentui/solid/preload"]
 
 [install]
-# One node_modules at the root: a single tsconfig and the test preload below resolve everything.
+# One node_modules at the root: a single tsconfig resolves everything.
 linker = "hoisted"
-
-[test]
-preload = ["@opentui/solid/preload"]

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { assert, describe, it } from "@effect/vitest"
 import { Option } from "effect"
 
 import { Program } from "@q/kit"
@@ -20,55 +20,55 @@ const streaming = (): Model =>
     resolve(AcceptPrompt, Message.SucceededAcceptPrompt()),
   ).model
 
-const unchanged = (before: Model, msg: Message) => expect(update(before, msg).model).toBe(before)
+const unchanged = (before: Model, msg: Message) => assert.strictEqual(update(before, msg).model, before)
 
 describe("write-ahead turn", () => {
-  test("a prompt is not on screen until the transcript accepts it", () => {
+  it("a prompt is not on screen until the transcript accepts it", () => {
     story(
       update,
       given(fresh()),
       message(Message.SubmittedPrompt({ text: "hello" })),
       model((m) => {
-        expect(m.messages).toEqual([])
-        expect(m.turn).toEqual(Turn.Accepting({ prompt: "hello" }))
+        assert.deepStrictEqual(m.messages, [])
+        assert.deepStrictEqual(m.turn, Turn.Accepting({ prompt: "hello" }))
       }),
       expectCommands(AcceptPrompt),
       resolve(AcceptPrompt, Message.SucceededAcceptPrompt()),
       model((m) => {
-        expect(m.messages).toEqual([
+        assert.deepStrictEqual(m.messages, [
           { id: 0, role: "user", text: "hello" },
           { id: 1, role: "assistant", text: "" },
         ])
-        expect(m.turn).toEqual(Turn.Streaming({ messageId: 1, prompt: "hello" }))
-        expect(m.nextId).toBe(2)
+        assert.deepStrictEqual(m.turn, Turn.Streaming({ messageId: 1, prompt: "hello" }))
+        assert.strictEqual(m.nextId, 2)
       }),
     )
   })
 
-  test("the accept command carries the prompt", () => {
+  it("the accept command carries the prompt", () => {
     const [command] = update(fresh(), Message.SubmittedPrompt({ text: "hello" })).commands ?? []
-    expect(command?.name).toBe("AcceptPrompt")
-    expect(command?.args).toEqual({ prompt: "hello" })
+    assert.strictEqual(command?.name, "AcceptPrompt")
+    assert.deepStrictEqual(command?.args, { prompt: "hello" })
   })
 
-  test("a rejected prompt leaves no row and shows a notice", () => {
+  it("a rejected prompt leaves no row and shows a notice", () => {
     story(
       update,
       given(fresh()),
       message(Message.SubmittedPrompt({ text: "hello" })),
       resolve(AcceptPrompt, Message.FailedAcceptPrompt({ error: "disk full" })),
       model((m) => {
-        expect(m.messages).toEqual([])
-        expect(m.turn).toEqual(Turn.Idle())
-        expect(m.notice).toEqual(Option.some("could not save prompt: disk full"))
+        assert.deepStrictEqual(m.messages, [])
+        assert.deepStrictEqual(m.turn, Turn.Idle())
+        assert.deepStrictEqual(m.notice, Option.some("could not save prompt: disk full"))
       }),
       message(Message.SubmittedPrompt({ text: "again" })),
-      model((m) => expect(m.notice).toEqual(Option.none())),
+      model((m) => assert.deepStrictEqual(m.notice, Option.none())),
       resolve(AcceptPrompt, Message.SucceededAcceptPrompt()),
     )
   })
 
-  test("completion ends the turn at once and records the full text behind it", () => {
+  it("completion ends the turn at once and records the full text behind it", () => {
     story(
       update,
       given(streaming()),
@@ -76,47 +76,47 @@ describe("write-ahead turn", () => {
       message(Message.ReceivedText({ messageId: 1, text: "llo" })),
       message(Message.CompletedTurn({ messageId: 1 })),
       model((m) => {
-        expect(m.messages[1]?.text).toBe("hello")
-        expect(m.turn).toEqual(Turn.Idle())
+        assert.strictEqual(m.messages[1]?.text, "hello")
+        assert.deepStrictEqual(m.turn, Turn.Idle())
       }),
       expectCommands(CommitTurn),
       resolve(CommitTurn, Message.SucceededCommitTurn({ messageId: 1 })),
-      model((m) => expect(m.turn).toEqual(Turn.Idle())),
+      model((m) => assert.deepStrictEqual(m.turn, Turn.Idle())),
     )
   })
 
-  test("a saved turn is a fact the model does not need", () => {
+  it("a saved turn is a fact the model does not need", () => {
     const idle = update(streaming(), Message.CompletedTurn({ messageId: 1 })).model
     unchanged(idle, Message.SucceededCommitTurn({ messageId: 1 }))
   })
 
-  test("the commit command carries the text and outcome", () => {
+  it("the commit command carries the text and outcome", () => {
     const withText = update(streaming(), Message.ReceivedText({ messageId: 1, text: "partial" })).model
     const [command] = update(withText, Message.PressedEscape()).commands ?? []
-    expect(command?.name).toBe("CommitTurn")
-    expect(command?.args).toEqual({ messageId: 1, text: "partial", outcome: Outcome.Cancelled() })
+    assert.strictEqual(command?.name, "CommitTurn")
+    assert.deepStrictEqual(command?.args, { messageId: 1, text: "partial", outcome: Outcome.Cancelled() })
   })
 
-  test("an agent failure records the error on the row and commits a failed outcome", () => {
+  it("an agent failure records the error on the row and commits a failed outcome", () => {
     const [command] = update(streaming(), Message.FailedTurn({ messageId: 1, error: "offline" })).commands ?? []
-    expect(command?.args).toEqual({ messageId: 1, text: " [error: offline]", outcome: Outcome.Failed({ error: "offline" }) })
+    assert.deepStrictEqual(command?.args, { messageId: 1, text: " [error: offline]", outcome: Outcome.Failed({ error: "offline" }) })
   })
 
-  test("a failed commit is a notice; the row stays", () => {
+  it("a failed commit is a notice; the row stays", () => {
     story(
       update,
       given(streaming()),
       message(Message.CompletedTurn({ messageId: 1 })),
       resolve(CommitTurn, Message.FailedCommitTurn({ messageId: 1, error: "timeout" })),
       model((m) => {
-        expect(m.messages).toHaveLength(2)
-        expect(m.turn).toEqual(Turn.Idle())
-        expect(m.notice).toEqual(Option.some("could not save turn: timeout"))
+        assert.strictEqual(m.messages.length, 2)
+        assert.deepStrictEqual(m.turn, Turn.Idle())
+        assert.deepStrictEqual(m.notice, Option.some("could not save turn: timeout"))
       }),
     )
   })
 
-  test("a failed commit landing during the next turn sets the notice and nothing else", () => {
+  it("a failed commit landing during the next turn sets the notice and nothing else", () => {
     const next = story(
       update,
       given(streaming()),
@@ -125,35 +125,35 @@ describe("write-ahead turn", () => {
       resolve(AcceptPrompt, Message.SucceededAcceptPrompt()),
       resolve(CommitTurn, Message.FailedCommitTurn({ messageId: 1, error: "timeout" })),
     ).model
-    expect(next.turn).toEqual(Turn.Streaming({ messageId: 3, prompt: "next" }))
-    expect(next.messages).toHaveLength(4)
-    expect(next.notice).toEqual(Option.some("could not save turn: timeout"))
+    assert.deepStrictEqual(next.turn, Turn.Streaming({ messageId: 3, prompt: "next" }))
+    assert.strictEqual(next.messages.length, 4)
+    assert.deepStrictEqual(next.notice, Option.some("could not save turn: timeout"))
   })
 
-  test("tokens append to the assistant row and leave every other row untouched by reference", () => {
+  it("tokens append to the assistant row and leave every other row untouched by reference", () => {
     const before = streaming()
     const after = update(before, Message.ReceivedText({ messageId: 1, text: "h" })).model
-    expect(after.messages[1]?.text).toBe("h")
-    expect(after.messages[0]).toBe(before.messages[0]!)
-    expect(after.turn).toBe(before.turn)
+    assert.strictEqual(after.messages[1]?.text, "h")
+    assert.strictEqual(after.messages[0], before.messages[0]!)
+    assert.strictEqual(after.turn, before.turn)
   })
 })
 
 describe("messages that do not fit the current state are ignored by reference", () => {
-  test("blank prompt, prompt while not idle", () => {
+  it("blank prompt, prompt while not idle", () => {
     unchanged(fresh(), Message.SubmittedPrompt({ text: "   " }))
     const accepting = update(fresh(), Message.SubmittedPrompt({ text: "one" })).model
     unchanged(accepting, Message.SubmittedPrompt({ text: "two" }))
     unchanged(streaming(), Message.SubmittedPrompt({ text: "two" }))
   })
 
-  test("escape while idle or accepting", () => {
+  it("escape while idle or accepting", () => {
     unchanged(fresh(), Message.PressedEscape())
     unchanged(update(fresh(), Message.SubmittedPrompt({ text: "one" })).model, Message.PressedEscape())
     unchanged(update(streaming(), Message.CompletedTurn({ messageId: 1 })).model, Message.PressedEscape())
   })
 
-  test("text, completion and failure for a foreign or finished turn", () => {
+  it("text, completion and failure for a foreign or finished turn", () => {
     const live = streaming()
     unchanged(live, Message.ReceivedText({ messageId: 0, text: "x" }))
     unchanged(live, Message.ReceivedText({ messageId: 99, text: "x" }))
@@ -166,7 +166,7 @@ describe("messages that do not fit the current state are ignored by reference", 
     unchanged(ended, Message.FailedTurn({ messageId: 1, error: "late" }))
   })
 
-  test("a stale completion from a cancelled turn cannot end the next turn", () => {
+  it("a stale completion from a cancelled turn cannot end the next turn", () => {
     const second = story(
       update,
       given(streaming()),
@@ -174,20 +174,20 @@ describe("messages that do not fit the current state are ignored by reference", 
       resolve(CommitTurn, Message.SucceededCommitTurn({ messageId: 1 })),
       message(Message.SubmittedPrompt({ text: "next" })),
       resolve(AcceptPrompt, Message.SucceededAcceptPrompt()),
-      model((m) => expect(m.turn).toEqual(Turn.Streaming({ messageId: 3, prompt: "next" }))),
+      model((m) => assert.deepStrictEqual(m.turn, Turn.Streaming({ messageId: 3, prompt: "next" }))),
     )
     unchanged(second.model, Message.CompletedTurn({ messageId: 1 }))
     unchanged(second.model, Message.SucceededCommitTurn({ messageId: 1 }))
   })
 
-  test("accept results while idle", () => {
+  it("accept results while idle", () => {
     unchanged(fresh(), Message.SucceededAcceptPrompt())
     unchanged(fresh(), Message.FailedAcceptPrompt({ error: "x" }))
   })
 })
 
 describe("init folds the transcript", () => {
-  test("completed turns become rows, and the model is idle", () => {
+  it("completed turns become rows, and the model is idle", () => {
     const m = init({
       events: [
         ConversationEvent.PromptAccepted({ prompt: "ab" }),
@@ -196,7 +196,7 @@ describe("init folds the transcript", () => {
         ConversationEvent.TurnEnded({ text: "", outcome: Outcome.Cancelled() }),
       ],
     }).model
-    expect(m).toEqual({
+    assert.deepStrictEqual(m, {
       messages: [
         { id: 0, role: "user", text: "ab" },
         { id: 1, role: "assistant", text: "AB" },
@@ -209,18 +209,18 @@ describe("init folds the transcript", () => {
     })
   })
 
-  test("a transcript that ends mid-turn is marked interrupted", () => {
+  it("a transcript that ends mid-turn is marked interrupted", () => {
     const m = init({ events: [ConversationEvent.PromptAccepted({ prompt: "ab" })] }).model
-    expect(m.messages[1]?.text).toBe("[interrupted]")
-    expect(m.turn).toEqual(Turn.Idle())
+    assert.strictEqual(m.messages[1]?.text, "[interrupted]")
+    assert.deepStrictEqual(m.turn, Turn.Idle())
   })
 
-  test("a stray TurnEnded is ignored", () => {
-    expect(init({ events: [ConversationEvent.TurnEnded({ text: "x", outcome: Outcome.Completed() })] }).model).toEqual(fresh())
+  it("a stray TurnEnded is ignored", () => {
+    assert.deepStrictEqual(init({ events: [ConversationEvent.TurnEnded({ text: "x", outcome: Outcome.Completed() })] }).model, fresh())
   })
 })
 
-test("the model is a fold over the message log", () => {
+it("the model is a fold over the message log", () => {
   const log = [
     Message.SubmittedPrompt({ text: "ab" }),
     Message.SucceededAcceptPrompt(),
@@ -233,7 +233,7 @@ test("the model is a fold over the message log", () => {
     Message.PressedEscape(),
     Message.SucceededCommitTurn({ messageId: 3 }),
   ]
-  expect(Program.replay(update, fresh(), log)).toEqual({
+  assert.deepStrictEqual(Program.replay(update, fresh(), log), {
     messages: [
       { id: 0, role: "user", text: "ab" },
       { id: 1, role: "assistant", text: "ab" },

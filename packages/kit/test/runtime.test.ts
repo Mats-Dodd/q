@@ -1,157 +1,163 @@
-import { describe, expect, test } from "bun:test"
-import { Effect, Fiber, Layer, Schema, type Scope, Stream } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+import { Deferred, Effect, Exit, Fiber, Schema, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { Message, type Model, program } from "./counter.fixture"
 import { type Return, replay } from "../src/program"
 import * as Runtime from "../src/runtime"
 import * as Subscription from "../src/subscription"
-import { settle, tick } from "../src/testing"
 
-/** Run a scoped test body against a deterministic clock. Closing the scope interrupts the runtime. */
-const run = <A>(body: Effect.Effect<A, never, Scope.Scope | TestClock.TestClock>) =>
-  Effect.runPromise(body.pipe(Effect.scoped, Effect.provide(TestClock.layer())))
-
+// `it.effect` runs each test in its own Scope on a TestClock; closing the Scope interrupts the runtime.
 
 describe("runtime", () => {
-  test("dispatch folds synchronously; replaying the log reproduces the model", () =>
-    run(
-      Effect.gen(function* () {
-        const runtime = yield* Runtime.make(program)
-        const log = yield* Effect.forkChild(Stream.runCollect(Stream.take(runtime.messages, 2)))
-        yield* Effect.yieldNow
+  it.effect("dispatch folds synchronously; replaying the log reproduces the model", () =>
+    Effect.gen(function* () {
+      const runtime = yield* Runtime.make(program)
+      const log = yield* Effect.forkChild(Stream.runCollect(Stream.take(runtime.messages, 2)), { startImmediately: true })
 
-        runtime.dispatch(Message.ClickedIncrement())
-        runtime.dispatch(Message.ClickedIncrement())
-        expect(runtime.model().count).toBe(2)
+      runtime.dispatch(Message.ClickedIncrement())
+      runtime.dispatch(Message.ClickedIncrement())
+      assert.strictEqual(runtime.model().count, 2)
 
-        const messages = yield* Fiber.join(log)
-        expect(messages).toEqual([Message.ClickedIncrement(), Message.ClickedIncrement()])
-        expect(replay(program.update, program.init().model, messages)).toEqual(runtime.model())
-      }),
-    ))
+      const messages = yield* Fiber.join(log)
+      assert.deepStrictEqual(messages, [Message.ClickedIncrement(), Message.ClickedIncrement()])
+      assert.deepStrictEqual(replay(program.update, program.init().model, messages), runtime.model())
+    }),
+  )
 
-  test("commands run on the runtime's clock and dispatch their result", () =>
-    run(
-      Effect.gen(function* () {
-        const runtime = yield* Runtime.make(program)
-        runtime.dispatch(Message.ClickedIncrement())
-        runtime.dispatch(Message.ClickedResetAfterDelay({ seconds: 2 }))
-        expect(runtime.model()).toEqual({ count: 1, isResetting: true })
+  it.effect("commands run on the runtime's clock and dispatch their result", () =>
+    Effect.gen(function* () {
+      const runtime = yield* Runtime.make(program)
+      const reset = yield* Effect.forkChild(
+        Stream.runHead(Stream.filter(runtime.messages, (m) => m._tag === "CompletedDelayReset")),
+        { startImmediately: true },
+      )
+      runtime.dispatch(Message.ClickedIncrement())
+      runtime.dispatch(Message.ClickedResetAfterDelay({ seconds: 2 }))
+      assert.deepStrictEqual(runtime.model(), { count: 1, isResetting: true })
 
-        yield* tick("1 second")
-        expect(runtime.model().isResetting).toBe(true)
+      yield* TestClock.adjust("1 second")
+      assert.isTrue(runtime.model().isResetting)
 
-        yield* tick("1 second")
-        expect(runtime.model()).toEqual({ count: 0, isResetting: false })
-      }),
-    ))
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(reset)
+      assert.deepStrictEqual(runtime.model(), { count: 0, isResetting: false })
+    }),
+  )
 
-  test("the model stream is observable", () =>
-    run(
-      Effect.gen(function* () {
-        const runtime = yield* Runtime.make(program)
-        const models = yield* Effect.forkChild(Stream.runCollect(Stream.take(runtime.models, 2)))
-        yield* Effect.yieldNow
+  it.effect("the model stream is observable", () =>
+    Effect.gen(function* () {
+      const runtime = yield* Runtime.make(program)
+      const models = yield* Effect.forkChild(Stream.runCollect(Stream.take(runtime.models, 2)), { startImmediately: true })
 
-        runtime.dispatch(Message.ClickedIncrement())
-        runtime.dispatch(Message.ClickedIncrement())
-        expect(yield* Fiber.join(models)).toEqual([
-          { count: 1, isResetting: false },
-          { count: 2, isResetting: false },
-        ])
-      }),
-    ))
+      runtime.dispatch(Message.ClickedIncrement())
+      runtime.dispatch(Message.ClickedIncrement())
+      assert.deepStrictEqual(yield* Fiber.join(models), [
+        { count: 1, isResetting: false },
+        { count: 2, isResetting: false },
+      ])
+    }),
+  )
 
-  test("onModel fires once per changed model, inside batch", () =>
-    run(
-      Effect.gen(function* () {
-        const seen: Array<number> = []
-        let batches = 0
-        const runtime = yield* Runtime.make(program, {
-          batch: (run) => {
-            batches += 1
-            run()
+  it.effect("onModel fires once per changed model, inside batch", () =>
+    Effect.gen(function* () {
+      const seen: Array<number> = []
+      let batches = 0
+      const runtime = yield* Runtime.make(program, {
+        batch: (run) => {
+          batches += 1
+          run()
+        },
+        onModel: (model) => seen.push(model.count),
+      })
+      runtime.dispatch(Message.ClickedIncrement())
+      assert.deepStrictEqual(seen, [1])
+      assert.strictEqual(batches, 1)
+    }),
+  )
+
+  it.effect("a throwing update crashes the runtime and is not published", () =>
+    Effect.gen(function* () {
+      let crashes = 0
+      const boom = (): Return<Model, Message> => {
+        throw new Error("boom")
+      }
+      const runtime = yield* Runtime.make({ ...program, update: boom }, { onCrash: () => { crashes += 1 } })
+      const seen: Array<Message> = []
+      yield* Effect.forkChild(Stream.runForEach(runtime.messages, (m) => Effect.sync(() => { seen.push(m) })), {
+        startImmediately: true,
+      })
+
+      runtime.dispatch(Message.ClickedIncrement())
+      runtime.dispatch(Message.ClickedIncrement())
+      assert.strictEqual(crashes, 1)
+      assert.isTrue(runtime.crashed())
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(seen, [])
+    }),
+  )
+
+  it.effect("a crashing subscription reports once and interrupts the commands in flight", () =>
+    Effect.gen(function* () {
+      const crashed = yield* Deferred.make<void>()
+      let crashes = 0
+
+      const Exploding = Subscription.make<Model, Message>()({
+        deps: Schema.Boolean,
+        modelToDeps: (model) => model.isResetting,
+        depsToStream: (isResetting) => (isResetting ? Stream.fromEffect(Effect.die("boom")) : Stream.empty),
+      })
+      const runtime = yield* Runtime.make(
+        { ...program, subscriptions: { exploding: Exploding } },
+        {
+          onCrash: () => {
+            crashes += 1
+            Deferred.doneUnsafe(crashed, Effect.void)
           },
-          onModel: (model) => seen.push(model.count),
-        })
-        runtime.dispatch(Message.ClickedIncrement())
-        expect(seen).toEqual([1])
-        expect(batches).toBe(1)
-      }),
-    ))
+        },
+      )
+      runtime.dispatch(Message.ClickedResetAfterDelay({ seconds: 1 }))
+      yield* Deferred.await(crashed)
 
-  test("a throwing update crashes the runtime and is not published", () =>
-    run(
-      Effect.gen(function* () {
-        let crashes = 0
-        const boom = (): Return<Model, Message> => {
-          throw new Error("boom")
-        }
-        const runtime = yield* Runtime.make({ ...program, update: boom }, { onCrash: () => { crashes += 1 } })
-        const seen: Array<Message> = []
-        yield* Effect.forkChild(Stream.runForEach(runtime.messages, (m) => Effect.sync(() => { seen.push(m) })))
-        yield* Effect.yieldNow
+      // The DelayReset command was interrupted with the runtime: time passing does not complete it.
+      yield* TestClock.adjust("1 second")
+      assert.strictEqual(crashes, 1)
+      assert.isTrue(runtime.crashed())
+      assert.isTrue(runtime.model().isResetting)
 
-        runtime.dispatch(Message.ClickedIncrement())
-        runtime.dispatch(Message.ClickedIncrement())
-        expect(crashes).toBe(1)
-        expect(runtime.crashed()).toBe(true)
-        yield* settle
-        expect(seen).toEqual([])
-      }),
-    ))
+      // Dispatch after a crash is dropped.
+      runtime.dispatch(Message.ClickedIncrement())
+      assert.strictEqual(runtime.model().count, 0)
+    }),
+  )
 
-  test("a crashing subscription closes the scope and reports once", () =>
-    run(
-      Effect.gen(function* () {
-        let closed = false
-        let crashes = 0
-        yield* Effect.addFinalizer(() => Effect.sync(() => { closed = true }))
+  it.effect("closing the scope interrupts pending commands", () =>
+    Effect.gen(function* () {
+      let completed = 0
+      const scope = yield* Scope.make()
+      const runtime = yield* Runtime.make(program, { onModel: (m) => { if (!m.isResetting) completed += 1 } }).pipe(
+        Scope.provide(scope),
+      )
+      runtime.dispatch(Message.ClickedResetAfterDelay({ seconds: 5 }))
+      yield* TestClock.adjust("1 second")
+      yield* Scope.close(scope, Exit.void)
 
-        const Exploding = Subscription.make<Model, Message>()({
-          deps: Schema.Boolean,
-          modelToDeps: (model) => model.isResetting,
-          depsToStream: (isResetting) => (isResetting ? Stream.fromEffect(Effect.die("boom")) : Stream.empty),
-        })
-        const runtime = yield* Runtime.make(
-          { ...program, subscriptions: { exploding: Exploding } },
-          { onCrash: () => { crashes += 1 } },
-        )
-        runtime.dispatch(Message.ClickedResetAfterDelay({ seconds: 1 }))
-        yield* tick("1 second")
+      yield* TestClock.adjust("10 seconds")
+      assert.strictEqual(completed, 0)
+    }),
+  )
 
-        expect(crashes).toBe(1)
-        expect(closed).toBe(true)
-        expect(runtime.model().isResetting).toBe(true)
-      }),
-    ))
-
-  test("closing the scope interrupts pending commands", async () => {
-    let completed = 0
-    await run(
-      Effect.gen(function* () {
-        const runtime = yield* Runtime.make(program, { onModel: (m) => { if (!m.isResetting) completed += 1 } })
-        runtime.dispatch(Message.ClickedResetAfterDelay({ seconds: 5 }))
-        yield* tick("1 second")
-      }),
-    )
-    await Effect.runPromise(Effect.provide(tick("10 seconds"), TestClock.layer()))
-    expect(completed).toBe(0)
-  })
-
-  test("flags are loaded once and handed to init", () =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        let loads = 0
-        const runtime = yield* Runtime.make({
-          ...program,
-          flags: Effect.sync(() => { loads += 1; return 40 }),
-          init: (count: number) => ({ model: { count, isResetting: false } }),
-        })
-        runtime.dispatch(Message.ClickedIncrement())
-        expect(runtime.model().count).toBe(41)
-        expect(loads).toBe(1)
-      }).pipe(Effect.scoped, Effect.provide(Layer.empty)),
-    ))
+  it.effect("flags are loaded once and handed to init", () =>
+    Effect.gen(function* () {
+      let loads = 0
+      const runtime = yield* Runtime.make({
+        ...program,
+        flags: Effect.sync(() => { loads += 1; return 40 }),
+        init: (count: number) => ({ model: { count, isResetting: false } }),
+      })
+      runtime.dispatch(Message.ClickedIncrement())
+      assert.strictEqual(runtime.model().count, 41)
+      assert.strictEqual(loads, 1)
+    }),
+  )
 })

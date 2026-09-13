@@ -1,234 +1,258 @@
-import { describe, expect, test } from "bun:test"
+import { assert, describe, it, layer } from "@effect/vitest"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Deferred, Effect, Fiber, Layer, Ref, type Scope, Semaphore, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Ref, Semaphore, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { Program, Runtime } from "@q/kit"
-import { settle, tick } from "@q/kit/testing"
 import { ConversationEvent, Outcome } from "../src/domain/event"
 import { type Model, Turn } from "../src/domain/model"
 import { Message } from "../src/message"
 import { program } from "../src/program"
-import { Agent, AgentError, makeEchoAgent } from "../src/services/agent"
-import { SqlTranscriptRepository } from "../src/services/repository"
-import { Resume, SessionTranscript, Transcript, TranscriptError } from "../src/services/transcript"
+import { Agent, AgentError } from "../src/services/agent"
+import { TranscriptRepository } from "../src/services/repository"
+import { Resume, Transcript, TranscriptError } from "../src/services/transcript"
 import { coalesce } from "../src/subscription"
 import { init } from "../src/update"
 
-type Services = Agent | Transcript | Scope.Scope | TestClock.TestClock
+// Shared by the block: the echo agent and the repository on a throwaway database. Per test: a new
+// session, provided inside the body. `it.effect` runs on a TestClock, so time is `TestClock.adjust`
+// and completion is a message on `runtime.messages`, waited for before the dispatch that causes it.
+//
+// Rule: wait for `SucceededAcceptPrompt` before adjusting the clock. The agent stream starts after
+// the transcript accepts the prompt (write-ahead); time advanced before that fires no sleeps.
 
-/** The real transcript on a throwaway database: one new session per test. */
-const sqlite = SessionTranscript(Resume.New(), "/test").pipe(
-  Layer.provide(SqlTranscriptRepository),
-  Layer.provide(SqliteClient.layer({ filename: ":memory:" })),
+const Shared = Layer.mergeAll(
+  Agent.Echo("10 millis"),
+  TranscriptRepository.Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" }))),
 )
 
-/** Run a scoped body with an echo agent and the SQLite transcript on a deterministic clock. */
-const run = <A>(
-  body: Effect.Effect<A, never, Services>,
-  options: { agent?: Layer.Layer<Agent>; transcript?: Layer.Layer<Transcript, unknown> } = {},
-) =>
-  Effect.runPromise(
-    body.pipe(
-      Effect.scoped,
-      Effect.provide(
-        Layer.mergeAll(options.agent ?? makeEchoAgent("10 millis"), options.transcript ?? sqlite, TestClock.layer()),
-      ),
-      Effect.orDie,
-    ),
-  )
+const session = Transcript.Session(Resume.New(), "/test")
 
 const assistantText = (runtime: Runtime.Runtime<Model, Message>) => runtime.model().messages[1]?.text
 
 const loadTranscript = Effect.flatMap(Transcript, (transcript) => transcript.load).pipe(Effect.catch(Effect.die))
 
-describe("program", () => {
-  test("a prompt streams back in batches, ends the turn, and is written ahead to the transcript", () =>
-    run(
-      Effect.gen(function* () {
-        const runtime = yield* Runtime.make(program)
-        const log = yield* Effect.forkChild(
-          Stream.runCollect(Stream.takeUntil(runtime.messages, (m) => m._tag === "SucceededCommitTurn")),
-        )
-        yield* Effect.yieldNow
+/** Fork a wait for the first Message that satisfies `predicate`. Fork before the dispatch, join after. */
+const awaiting = (runtime: Runtime.Runtime<Model, Message>, predicate: (message: Message) => boolean) =>
+  Effect.forkChild(Stream.runHead(Stream.filter(runtime.messages, predicate)), { startImmediately: true })
 
-        runtime.dispatch(Message.SubmittedPrompt({ text: "abcdef" }))
-        expect(runtime.model().turn).toEqual(Turn.Accepting({ prompt: "abcdef" }))
-        yield* settle
-        expect(runtime.model().turn).toEqual(Turn.Streaming({ messageId: 1, prompt: "abcdef" }))
-        expect(runtime.model().messages.map((m) => m.text)).toEqual(["abcdef", ""])
+const accepted = (m: Message) => m._tag === "SucceededAcceptPrompt"
+const received = (m: Message) => m._tag === "ReceivedText"
+const committed = (messageId: number) => (m: Message) => m._tag === "SucceededCommitTurn" && m.messageId === messageId
 
-        yield* tick("33 millis")
-        expect(assistantText(runtime)).toBe("abc")
-        yield* tick("33 millis")
-        expect(assistantText(runtime)).toBe("abcdef")
-        expect(runtime.model().turn).toEqual(Turn.Idle())
+layer(Shared)("program", (it) => {
+  it.effect("a prompt streams back in batches, ends the turn, and is written ahead to the transcript", () =>
+    Effect.gen(function* () {
+      const runtime = yield* Runtime.make(program)
+      const log = yield* Effect.forkChild(Stream.runCollect(Stream.takeUntil(runtime.messages, committed(1))), {
+        startImmediately: true,
+      })
+      const accept = yield* awaiting(runtime, accepted)
+      const abc = yield* awaiting(runtime, received)
 
-        const messages = yield* Fiber.join(log)
-        expect(messages.filter((m) => m._tag === "ReceivedText").length).toBeLessThanOrEqual(2)
-        expect(messages.map((m) => m._tag)).toContain("CompletedTurn")
+      runtime.dispatch(Message.SubmittedPrompt({ text: "abcdef" }))
+      assert.deepStrictEqual(runtime.model().turn, Turn.Accepting({ prompt: "abcdef" }))
+      yield* Fiber.join(accept)
+      assert.deepStrictEqual(runtime.model().turn, Turn.Streaming({ messageId: 1, prompt: "abcdef" }))
+      assert.deepStrictEqual(runtime.model().messages.map((m) => m.text), ["abcdef", ""])
 
-        expect(yield* loadTranscript).toEqual([
-          ConversationEvent.PromptAccepted({ prompt: "abcdef" }),
-          ConversationEvent.TurnEnded({ text: "abcdef", outcome: Outcome.Completed() }),
-        ])
-        expect(Program.replay(program.update, init({ events: [] }).model, messages)).toEqual(runtime.model())
-      }),
-    ))
+      yield* TestClock.adjust("33 millis")
+      yield* Fiber.join(abc)
+      assert.strictEqual(assistantText(runtime), "abc")
+      yield* TestClock.adjust("33 millis")
+      const messages = yield* Fiber.join(log)
+      assert.strictEqual(assistantText(runtime), "abcdef")
+      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
 
-  test("escape cancels the stream mid-turn and commits the partial text", () =>
-    run(
-      Effect.gen(function* () {
-        const runtime = yield* Runtime.make(program)
-        runtime.dispatch(Message.SubmittedPrompt({ text: "abcdef" }))
-        yield* tick("33 millis")
-        expect(assistantText(runtime)).toBe("abc")
+      assert.isTrue(messages.filter(received).length <= 2)
+      assert.include(messages.map((m) => m._tag), "CompletedTurn")
+      assert.deepStrictEqual(yield* loadTranscript, [
+        ConversationEvent.PromptAccepted({ prompt: "abcdef" }),
+        ConversationEvent.TurnEnded({ text: "abcdef", outcome: Outcome.Completed() }),
+      ])
+      assert.deepStrictEqual(Program.replay(program.update, init({ events: [] }).model, messages), runtime.model())
+    }).pipe(Effect.provide(session)),
+  )
 
-        runtime.dispatch(Message.PressedEscape())
-        expect(runtime.model().turn).toEqual(Turn.Idle())
-        yield* tick("1 second")
-        expect(assistantText(runtime)).toBe("abc")
+  it.effect("escape cancels the stream mid-turn and commits the partial text", () =>
+    Effect.gen(function* () {
+      const runtime = yield* Runtime.make(program)
+      const accept = yield* awaiting(runtime, accepted)
+      const abc = yield* awaiting(runtime, received)
+      const commit = yield* awaiting(runtime, committed(1))
 
-        const transcript = yield* loadTranscript
-        expect(transcript.at(-1)).toEqual(ConversationEvent.TurnEnded({ text: "abc", outcome: Outcome.Cancelled() }))
-      }),
-    ))
+      runtime.dispatch(Message.SubmittedPrompt({ text: "abcdef" }))
+      yield* Fiber.join(accept)
+      yield* TestClock.adjust("33 millis")
+      yield* Fiber.join(abc)
+      assert.strictEqual(assistantText(runtime), "abc")
 
-  test("a new prompt after cancellation starts a fresh stream", () =>
-    run(
-      Effect.gen(function* () {
-        const runtime = yield* Runtime.make(program)
-        runtime.dispatch(Message.SubmittedPrompt({ text: "ab" }))
-        yield* settle
-        runtime.dispatch(Message.PressedEscape())
-        yield* settle
-        runtime.dispatch(Message.SubmittedPrompt({ text: "xy" }))
-        yield* tick("1 second")
-        expect(runtime.model().messages.map((m) => m.text)).toEqual(["ab", "", "xy", "xy"])
-        expect(runtime.model().turn).toEqual(Turn.Idle())
-      }),
-    ))
+      runtime.dispatch(Message.PressedEscape())
+      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      yield* Fiber.join(commit)
+      yield* TestClock.adjust("1 second")
+      assert.strictEqual(assistantText(runtime), "abc")
 
-  test("an agent failure becomes a failed outcome in the transcript", () => {
-    const failing = Layer.succeed(Agent, {
-      stream: () => Stream.concat(Stream.make("o"), Stream.fail(new AgentError({ message: "offline" }))),
-    })
-    return run(
-      Effect.gen(function* () {
-        const runtime = yield* Runtime.make(program)
-        runtime.dispatch(Message.SubmittedPrompt({ text: "hi" }))
-        yield* tick("1 second")
-        expect(assistantText(runtime)).toBe("o [error: offline]")
-        expect(runtime.model().turn).toEqual(Turn.Idle())
-        const transcript = yield* loadTranscript
-        expect(transcript.at(-1)).toEqual(
-          ConversationEvent.TurnEnded({ text: "o [error: offline]", outcome: Outcome.Failed({ error: "offline" }) }),
-        )
-      }),
-      { agent: failing },
-    )
-  })
+      const transcript = yield* loadTranscript
+      assert.deepStrictEqual(transcript.at(-1), ConversationEvent.TurnEnded({ text: "abc", outcome: Outcome.Cancelled() }))
+    }).pipe(Effect.provide(session)),
+  )
 
-  test("a transcript that refuses writes keeps the model clean and shows a notice", () => {
-    const readOnly = Layer.succeed(Transcript, {
-      append: () => Effect.fail(new TranscriptError({ cause: new Error("read only") })),
-      load: Effect.succeed([]),
-    })
-    return run(
-      Effect.gen(function* () {
-        const runtime = yield* Runtime.make(program)
-        runtime.dispatch(Message.SubmittedPrompt({ text: "hi" }))
-        yield* settle
-        expect(runtime.model().messages).toEqual([])
-        expect(runtime.model().turn).toEqual(Turn.Idle())
-        expect(runtime.model().notice._tag).toBe("Some")
-      }),
-      { transcript: readOnly },
-    )
-  })
+  it.effect("a new prompt after cancellation starts a fresh stream", () =>
+    Effect.gen(function* () {
+      const runtime = yield* Runtime.make(program)
+      const accept = yield* awaiting(runtime, accepted)
+      const second = yield* awaiting(runtime, committed(3))
 
-  test("the next prompt is accepted while the previous turn is still being recorded", () =>
-    run(
-      Effect.gen(function* () {
-        // A transcript with latency: every append waits on a gate, and appends are serialised (the contract).
-        const gate = yield* Ref.make(yield* Deferred.make<void>())
-        const events = yield* Ref.make<ReadonlyArray<ConversationEvent>>([])
-        const permit = yield* Semaphore.make(1)
-        const gated = Layer.succeed(Transcript, {
-          append: (event) =>
-            permit.withPermits(1)(
-              Effect.andThen(
-                Effect.flatMap(Ref.get(gate), Deferred.await),
-                Ref.update(events, (all) => [...all, event]),
-              ),
+      runtime.dispatch(Message.SubmittedPrompt({ text: "ab" }))
+      yield* Fiber.join(accept)
+      runtime.dispatch(Message.PressedEscape())
+      runtime.dispatch(Message.SubmittedPrompt({ text: "xy" }))
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(second)
+      assert.deepStrictEqual(runtime.model().messages.map((m) => m.text), ["ab", "", "xy", "xy"])
+      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+    }).pipe(Effect.provide(session)),
+  )
+
+  it.effect("an agent failure becomes a failed outcome in the transcript", () =>
+    Effect.gen(function* () {
+      const failing = Layer.succeed(Agent)({
+        stream: () => Stream.concat(Stream.make("o"), Stream.fail(new AgentError({ message: "offline" }))),
+      })
+      const runtime = yield* Runtime.make(program).pipe(Effect.provide(failing))
+      const commit = yield* awaiting(runtime, committed(1))
+
+      runtime.dispatch(Message.SubmittedPrompt({ text: "hi" }))
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(commit)
+      assert.strictEqual(assistantText(runtime), "o [error: offline]")
+      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      const transcript = yield* loadTranscript
+      assert.deepStrictEqual(
+        transcript.at(-1),
+        ConversationEvent.TurnEnded({ text: "o [error: offline]", outcome: Outcome.Failed({ error: "offline" }) }),
+      )
+    }).pipe(Effect.provide(session)),
+  )
+
+  it.effect("a transcript that refuses writes keeps the model clean and shows a notice", () =>
+    Effect.gen(function* () {
+      const readOnly = Layer.succeed(Transcript)({
+        append: () => Effect.fail(new TranscriptError({ cause: new Error("read only") })),
+        load: Effect.succeed([]),
+      })
+      const runtime = yield* Runtime.make(program).pipe(Effect.provide(readOnly))
+      const refused = yield* awaiting(runtime, (m) => m._tag === "FailedAcceptPrompt")
+
+      runtime.dispatch(Message.SubmittedPrompt({ text: "hi" }))
+      yield* Fiber.join(refused)
+      assert.deepStrictEqual(runtime.model().messages, [])
+      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      assert.strictEqual(runtime.model().notice._tag, "Some")
+    }),
+  )
+
+  it.effect("the next prompt is accepted while the previous turn is still being recorded", () =>
+    Effect.gen(function* () {
+      // A transcript with latency: every append waits on a gate, and appends are serialised (the contract).
+      const gate = yield* Ref.make(yield* Deferred.make<void>())
+      const events = yield* Ref.make<ReadonlyArray<ConversationEvent>>([])
+      const permit = yield* Semaphore.make(1)
+      const gated = Layer.succeed(Transcript)({
+        append: (event) =>
+          permit.withPermits(1)(
+            Effect.andThen(
+              Effect.flatMap(Ref.get(gate), Deferred.await),
+              Ref.update(events, (all) => [...all, event]),
             ),
-          load: Ref.get(events),
-        })
-        const open = Effect.flatMap(Ref.get(gate), (d) => Deferred.succeed(d, undefined))
-        const close = Effect.flatMap(Deferred.make<void>(), (d) => Ref.set(gate, d))
+          ),
+        load: Ref.get(events),
+      })
+      const open = Effect.flatMap(Ref.get(gate), (d) => Deferred.succeed(d, undefined))
+      const close = Effect.flatMap(Deferred.make<void>(), (d) => Ref.set(gate, d))
 
-        const runtime = yield* Runtime.make(program).pipe(Effect.provide(gated))
-        yield* open
-        runtime.dispatch(Message.SubmittedPrompt({ text: "abcdef" }))
-        yield* tick("33 millis")
-        expect(runtime.model().turn).toEqual(Turn.Streaming({ messageId: 1, prompt: "abcdef" }))
+      const runtime = yield* Runtime.make(program).pipe(Effect.provide(gated))
+      const accept = yield* awaiting(runtime, accepted)
+      const abc = yield* awaiting(runtime, received)
+      const ended = yield* awaiting(runtime, (m) => m._tag === "CompletedTurn" && m.messageId === 1)
+      const second = yield* awaiting(runtime, committed(3))
 
-        // Hold the transcript while turn one finishes: the turn ends at once, its record is in flight.
-        yield* close
-        yield* tick("1 second")
-        expect(runtime.model().turn).toEqual(Turn.Idle())
-        expect(assistantText(runtime)).toBe("abcdef")
-        expect(yield* Ref.get(events)).toHaveLength(1)
+      yield* open
+      runtime.dispatch(Message.SubmittedPrompt({ text: "abcdef" }))
+      yield* Fiber.join(accept)
+      yield* TestClock.adjust("33 millis")
+      yield* Fiber.join(abc)
+      assert.deepStrictEqual(runtime.model().turn, Turn.Streaming({ messageId: 1, prompt: "abcdef" }))
 
-        // Turn two is not refused: it is accepted behind the held record.
-        runtime.dispatch(Message.SubmittedPrompt({ text: "xy" }))
-        yield* settle
-        expect(runtime.model().turn).toEqual(Turn.Accepting({ prompt: "xy" }))
-        expect(runtime.model().messages).toHaveLength(2)
+      // Hold the transcript while turn one finishes: the turn ends at once, its record is in flight.
+      yield* close
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(ended)
+      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      assert.strictEqual(assistantText(runtime), "abcdef")
+      assert.strictEqual((yield* Ref.get(events)).length, 1)
 
-        yield* open
-        yield* tick("1 second")
-        expect(runtime.model().messages.map((m) => m.text)).toEqual(["abcdef", "abcdef", "xy", "xy"])
-        expect(runtime.model().turn).toEqual(Turn.Idle())
-        expect(yield* Ref.get(events)).toEqual([
-          ConversationEvent.PromptAccepted({ prompt: "abcdef" }),
-          ConversationEvent.TurnEnded({ text: "abcdef", outcome: Outcome.Completed() }),
-          ConversationEvent.PromptAccepted({ prompt: "xy" }),
-          ConversationEvent.TurnEnded({ text: "xy", outcome: Outcome.Completed() }),
-        ])
-      }),
-    ))
+      // Turn two is not refused: it is accepted behind the held record.
+      runtime.dispatch(Message.SubmittedPrompt({ text: "xy" }))
+      yield* TestClock.adjust("1 second")
+      assert.deepStrictEqual(runtime.model().turn, Turn.Accepting({ prompt: "xy" }))
+      assert.strictEqual(runtime.model().messages.length, 2)
 
-  test("resume: a fresh program built from the transcript equals the live model", () =>
-    run(
-      Effect.gen(function* () {
-        const live = yield* Runtime.make(program)
-        live.dispatch(Message.SubmittedPrompt({ text: "abc" }))
-        yield* tick("1 second")
-        live.dispatch(Message.SubmittedPrompt({ text: "defg" }))
-        yield* tick("33 millis")
-        live.dispatch(Message.PressedEscape())
-        yield* tick("1 second")
-        expect(live.model().turn).toEqual(Turn.Idle())
+      yield* open
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(second)
+      assert.deepStrictEqual(runtime.model().messages.map((m) => m.text), ["abcdef", "abcdef", "xy", "xy"])
+      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      assert.deepStrictEqual(yield* Ref.get(events), [
+        ConversationEvent.PromptAccepted({ prompt: "abcdef" }),
+        ConversationEvent.TurnEnded({ text: "abcdef", outcome: Outcome.Completed() }),
+        ConversationEvent.PromptAccepted({ prompt: "xy" }),
+        ConversationEvent.TurnEnded({ text: "xy", outcome: Outcome.Completed() }),
+      ])
+    }),
+  )
 
-        const restored = yield* Runtime.make(program)
-        expect(restored.model()).toEqual(live.model())
-        expect(restored.model().messages.map((m) => m.text)).toEqual(["abc", "abc", "defg", "def"])
-      }),
-    ))
+  it.effect("resume: a fresh program built from the transcript equals the live model", () =>
+    Effect.gen(function* () {
+      const live = yield* Runtime.make(program)
+      const acceptFirst = yield* awaiting(live, accepted)
+      const first = yield* awaiting(live, committed(1))
+      const second = yield* awaiting(live, committed(3))
+
+      live.dispatch(Message.SubmittedPrompt({ text: "abc" }))
+      yield* Fiber.join(acceptFirst)
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(first)
+
+      const acceptSecond = yield* awaiting(live, accepted)
+      const def = yield* awaiting(live, (m) => received(m) && m.messageId === 3)
+      live.dispatch(Message.SubmittedPrompt({ text: "defg" }))
+      yield* Fiber.join(acceptSecond)
+      yield* TestClock.adjust("33 millis")
+      yield* Fiber.join(def)
+      live.dispatch(Message.PressedEscape())
+      yield* Fiber.join(second)
+      assert.deepStrictEqual(live.model().turn, Turn.Idle())
+
+      const restored = yield* Runtime.make(program)
+      assert.deepStrictEqual(restored.model(), live.model())
+      assert.deepStrictEqual(restored.model().messages.map((m) => m.text), ["abc", "abc", "defg", "def"])
+    }).pipe(Effect.provide(session)),
+  )
 })
 
 describe("coalesce", () => {
-  test("merges adjacent text for the same row and keeps terminal messages in order", () => {
+  it("merges adjacent text for the same row and keeps terminal messages in order", () => {
     const batch = [
       Message.ReceivedText({ messageId: 1, text: "a" }),
       Message.ReceivedText({ messageId: 1, text: "b" }),
       Message.CompletedTurn({ messageId: 1 }),
     ]
-    expect(coalesce(batch)).toEqual([
+    assert.deepStrictEqual(coalesce(batch), [
       Message.ReceivedText({ messageId: 1, text: "ab" }),
       Message.CompletedTurn({ messageId: 1 }),
     ])
-    expect(coalesce([])).toEqual([])
+    assert.deepStrictEqual(coalesce([]), [])
   })
 })

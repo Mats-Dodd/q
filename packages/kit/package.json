@@ -10,7 +10,7 @@
     "./testing": "./src/testing.ts"
   },
   "dependencies": {
-    "effect": "4.0.0-rc.112"
+    "effect": "4.0.0-rc.115"
   },
   "peerDependencies": {
     "solid-js": "1.9.12"

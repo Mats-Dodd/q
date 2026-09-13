@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, PubSub, Schema, Scope, Stream } from "effect"
+import { Cause, Effect, Exit, PubSub, Queue, Schema, Scope, Stream } from "effect"
 
 import type { Command } from "./command"
 import type { Program } from "./program"
@@ -26,9 +26,13 @@ export interface Runtime<Model, Msg> {
 }
 
 /**
- * Build a running Elm loop inside the current Scope. Commands and Subscriptions are forked
- * into that Scope. A crash closes the Scope, interrupting everything. Requires the services
- * `R` that the program's flags, Commands and Subscriptions declare.
+ * Build a running Elm loop inside the current Scope. Commands and Subscriptions are forked into a
+ * child Scope of it. A crash closes that child Scope, interrupting everything; the caller's Scope
+ * stays open. Requires the services `R` that the program's flags, Commands and Subscriptions declare.
+ *
+ * `dispatch` is synchronous for the view's sake. It hands Commands to a runner fiber through a
+ * Queue, so everything after the fold runs on the Effect scheduler: tests drive it with `TestClock`
+ * and observe it through `messages`.
  */
 export const make = <Model, Msg, R, Flags>(
   program: Program<Model, Msg, R, Flags>,
@@ -36,9 +40,11 @@ export const make = <Model, Msg, R, Flags>(
 ): Effect.Effect<Runtime<Model, Msg>, never, R | Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope
-    const context = yield* Effect.context<R>()
+    const inner = yield* Scope.fork(scope)
     const log = yield* PubSub.unbounded<Msg>()
     const models = yield* PubSub.unbounded<Model>()
+    // The command channel. Failing it is the crash signal: every failure path ends here.
+    const commands = yield* Queue.unbounded<Command<Msg, R>, unknown>()
     const batch = options.batch ?? ((run) => run())
     const report = options.onCrash ?? ((cause) => console.error(Cause.pretty(cause)))
 
@@ -57,41 +63,45 @@ export const make = <Model, Msg, R, Flags>(
       }),
     )
 
-    /** Idempotent: the first crash wins, later ones are ignored. Closes the scope on a fresh root fiber. */
-    const crash = (cause: Cause.Cause<unknown>) =>
-      Effect.sync(() => {
-        if (crashed) return
-        crashed = true
-        pending.length = 0
-        report(cause)
-        Effect.runFork(Scope.close(scope, Exit.void))
-      })
-
-    const forkInScope = (effect: Effect.Effect<void, never, R>) => {
-      Effect.runForkWith(context)(Effect.forkIn(effect, scope))
+    /** Idempotent: the first crash wins, later ones are ignored. Reports here; the runner closes `inner`. */
+    const crash = (cause: Cause.Cause<unknown>) => {
+      if (crashed) return
+      crashed = true
+      pending.length = 0
+      report(cause)
+      Queue.failCauseUnsafe(commands, cause)
     }
-
-    const runCommand = (command: Command<Msg, R>) =>
-      queueMicrotask(() => {
-        if (disposed || crashed) return
-        forkInScope(
-          command.effect.pipe(
-            Effect.flatMap((message) => Effect.sync(() => dispatch(message))),
-            Effect.catchCause(crash),
-          ),
-        )
-      })
+    const crashWith = (cause: Cause.Cause<unknown>) => Effect.sync(() => crash(cause))
 
     /** Fold first, publish second: the log only ever contains Messages that were applied. */
     const step = (message: Msg) => {
       const next = program.update(model, message)
-      PubSub.publishUnsafe(log, message)
-      if (next.model !== model) {
-        model = next.model
-        PubSub.publishUnsafe(models, model)
-        options.onModel?.(model)
+      const changed = next.model !== model
+      model = next.model
+      for (const command of next.commands ?? []) Queue.offerUnsafe(commands, command)
+      outbox.push({ message, model: changed ? model : undefined })
+      if (changed) options.onModel?.(model)
+    }
+
+    /**
+     * Publish after the fold, never inside it: a fiber waiting on a PubSub resumes synchronously in
+     * `publishUnsafe`, and if it dispatches, that dispatch must fold at once, not queue behind a
+     * drain in progress. A dispatch made during publishing lands in `outbox` and this loop takes it.
+     */
+    const outbox: Array<{ readonly message: Msg; readonly model: Model | undefined }> = []
+    let publishing = false
+    const publish = () => {
+      if (publishing) return
+      publishing = true
+      try {
+        while (outbox.length > 0) {
+          const { message, model } = outbox.shift()!
+          PubSub.publishUnsafe(log, message)
+          if (model !== undefined) PubSub.publishUnsafe(models, model)
+        }
+      } finally {
+        publishing = false
       }
-      for (const command of next.commands ?? []) runCommand(command)
     }
 
     const drain = () => {
@@ -105,10 +115,11 @@ export const make = <Model, Msg, R, Flags>(
           })
         }
       } catch (error) {
-        Effect.runSync(crash(Cause.die(error)))
+        crash(Cause.die(error))
       } finally {
         draining = false
       }
+      publish()
     }
 
     const dispatch = (message: Msg) => {
@@ -116,6 +127,26 @@ export const make = <Model, Msg, R, Flags>(
       pending.push(message)
       if (!draining) drain()
     }
+
+    const runCommand = (command: Command<Msg, R>) =>
+      Effect.forkIn(
+        command.effect.pipe(
+          Effect.flatMap((message) => Effect.sync(() => dispatch(message))),
+          Effect.catchCause(crashWith),
+        ),
+        inner,
+        { startImmediately: true },
+      )
+
+    // The runner lives in the caller's Scope so it can close `inner` without closing itself.
+    yield* Effect.forkIn(
+      Stream.fromQueue(commands).pipe(
+        Stream.runForEach(runCommand),
+        Effect.catchCause(() => Scope.close(inner, Exit.void)),
+      ),
+      scope,
+      { startImmediately: true },
+    )
 
     for (const subscription of Object.values(program.subscriptions ?? {})) {
       const equivalence = Schema.toEquivalence(subscription.deps)
@@ -130,14 +161,14 @@ export const make = <Model, Msg, R, Flags>(
           Stream.changesWith(equivalence),
           Stream.switchMap(subscription.depsToStream),
           Stream.runForEach((message) => Effect.sync(() => dispatch(message))),
-          Effect.catchCause(crash),
+          Effect.catchCause(crashWith),
         ),
-        scope,
+        inner,
         { startImmediately: true },
       )
     }
 
-    for (const command of initial.commands ?? []) runCommand(command)
+    for (const command of initial.commands ?? []) Queue.offerUnsafe(commands, command)
 
     return {
       dispatch,

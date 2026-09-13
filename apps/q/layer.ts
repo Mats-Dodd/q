@@ -1,15 +1,6 @@
 import { BunServices } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import {
-  type Agent,
-  EchoAgent,
-  type Resume,
-  SessionTranscript,
-  SqlTranscriptRepository,
-  type Transcript,
-  type TranscriptError,
-  type TranscriptRepository,
-} from "@q/core"
+import { Agent, type Resume, Transcript, type TranscriptError, TranscriptRepository } from "@q/core"
 import { Config, Effect, FileSystem, Layer, Option, Path, type PlatformError } from "effect"
 
 /** What one launch of `q` needs to know. Parsed from the command line in `index.tsx`. */
@@ -22,9 +13,9 @@ export interface Launch {
 }
 
 /** Where the database lives when `--db` is not given: `$Q_DB`, else `$XDG_DATA_HOME/q/q.db`, else `~/.local/share/q/q.db`. */
-export const DbPath: Config.Config<string> = Config.string("Q_DB").pipe(
+export const DbPath: Config.Config<string> = Config.String("Q_DB").pipe(
   Config.orElse(() =>
-    Config.all([Config.option(Config.string("XDG_DATA_HOME")), Config.string("HOME")]).pipe(
+    Config.all([Config.option(Config.String("XDG_DATA_HOME")), Config.String("HOME")]).pipe(
       Config.map(([xdg, home]) => `${Option.getOrElse(xdg, () => `${home}/.local/share`)}/q/q.db`),
     ),
   ),
@@ -49,14 +40,14 @@ const Sqlite = (db: string) =>
 export const Storage = (
   db: string,
 ): Layer.Layer<TranscriptRepository, TranscriptError | PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
-  SqlTranscriptRepository.pipe(Layer.provide(Sqlite(db)))
+  TranscriptRepository.Sql.pipe(Layer.provide(Sqlite(db)))
 
 /**
  * The services the binary runs with. Swap Layers here; the program does not change. Closed over
  * Bun's platform services because the TUI builds it in its own runtime.
  */
 export const AppLayer = (launch: Launch): Layer.Layer<Agent | Transcript, TranscriptError | PlatformError.PlatformError> =>
-  Layer.mergeAll(EchoAgent, SessionTranscript(launch.resume, launch.cwd)).pipe(
+  Layer.mergeAll(Agent.Echo("30 millis"), Transcript.Session(launch.resume, launch.cwd)).pipe(
     Layer.provide(Storage(launch.db)),
     Layer.provide(BunServices.layer),
   )

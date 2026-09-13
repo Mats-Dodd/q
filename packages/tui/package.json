@@ -12,10 +12,10 @@
     "@opentui/solid": "0.5.10",
     "@q/core": "workspace:*",
     "@q/kit": "workspace:*",
-    "effect": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.115",
     "solid-js": "1.9.12"
   },
   "devDependencies": {
-    "@effect/sql-sqlite-bun": "4.0.0-rc.112"
+    "@effect/sql-sqlite-bun": "4.0.0-rc.115"
   }
 }

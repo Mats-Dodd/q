@@ -5,10 +5,11 @@ export { ConversationEvent, Outcome } from "./domain/event"
 export { ChatMessage, Model, Role, Turn } from "./domain/model"
 export { Session, SessionId } from "./domain/session"
 
-// Services: tags with their Layers. Storage is bound to a concrete `SqlClient` by the composition root.
-export { Agent, AgentError, EchoAgent, makeEchoAgent } from "./services/agent"
-export { SqlTranscriptRepository, TranscriptRepository } from "./services/repository"
-export { Resume, SessionTranscript, Transcript, TranscriptError } from "./services/transcript"
+// Services: tags with their Layers as statics (`Agent.Echo`, `TranscriptRepository.Sql`,
+// `Transcript.Session`). Storage is bound to a concrete `SqlClient` by the composition root.
+export { Agent, AgentError } from "./services/agent"
+export { TranscriptRepository } from "./services/repository"
+export { Resume, Transcript, TranscriptError } from "./services/transcript"
 
 // Program: messages, commands, update, subscriptions.
 export { AcceptPrompt, CommitTurn } from "./command"

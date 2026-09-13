@@ -1,50 +1,55 @@
-import { describe, expect, test } from "bun:test"
+import { assert, it, layer } from "@effect/vitest"
+import { BunFileSystem } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Context, Deferred, Effect, Fiber, Layer, Ref } from "effect"
+import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Ref } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 
 import { ConversationEvent, Outcome } from "../src/domain/event"
 import { SessionId } from "../src/domain/session"
-import { SqlTranscriptRepository, TranscriptRepository } from "../src/services/repository"
-import { Resume, SessionTranscript, Transcript } from "../src/services/transcript"
+import { TranscriptRepository } from "../src/services/repository"
+import { Resume, Transcript } from "../src/services/transcript"
 
-// End to end over the real SQLite Layer on a throwaway database. Substitutes are plain `Layer.succeed`.
+// End to end over the real SQLite Layer. One throwaway database per block, built once; every test
+// works in its own `cwd`, so the tests do not depend on their order. The clock is real: `created_at`
+// orders sessions.
 
-const Sqlite = SqlTranscriptRepository.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
+const Sqlite = TranscriptRepository.Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
 
-const transcript = (resume: Resume, cwd = "/a") =>
-  Effect.map(Layer.build(SessionTranscript(resume, cwd)), (context) => Context.get(context, Transcript))
+/** The `Transcript` of one session, built in the test's Scope over the block's repository. */
+const transcript = (resume: Resume, cwd: string) =>
+  Effect.map(Layer.build(Transcript.Session(resume, cwd)), (context) => Context.get(context, Transcript))
 
 const prompt = ConversationEvent.PromptAccepted({ prompt: "hi" })
 const ended = ConversationEvent.TurnEnded({ text: "hi", outcome: Outcome.Failed({ error: "boom" }) })
 
-describe("SessionTranscript", () => {
-  test("New starts empty; Latest resumes it per directory; Session by id; an unknown id fails the Layer", () =>
+layer(Sqlite, { excludeTestServices: true })("Transcript.Session", (it) => {
+  it.effect("New starts empty; Latest resumes it per directory; Session by id; an unknown id fails the Layer", () =>
     Effect.gen(function* () {
-      const fresh = yield* transcript(Resume.New())
-      expect(yield* fresh.load).toEqual([])
+      const fresh = yield* transcript(Resume.New(), "/resume/a")
+      assert.deepStrictEqual(yield* fresh.load, [])
       yield* fresh.append(prompt)
       yield* fresh.append(ended)
 
-      expect(yield* (yield* transcript(Resume.Latest())).load).toEqual([prompt, ended])
-      expect(yield* (yield* transcript(Resume.Latest(), "/b")).load).toEqual([])
+      assert.deepStrictEqual(yield* (yield* transcript(Resume.Latest(), "/resume/a")).load, [prompt, ended])
+      assert.deepStrictEqual(yield* (yield* transcript(Resume.Latest(), "/resume/b")).load, [])
 
-      const [session] = yield* (yield* TranscriptRepository).sessions("/a")
-      expect(yield* (yield* transcript(Resume.Session({ id: session!.id }))).load).toEqual([prompt, ended])
+      const [session] = yield* (yield* TranscriptRepository).sessions("/resume/a")
+      assert.deepStrictEqual(yield* (yield* transcript(Resume.Session({ id: session!.id }), "/resume/a")).load, [prompt, ended])
 
-      const missing = yield* Effect.flip(transcript(Resume.Session({ id: SessionId.make("nope") })))
-      expect(missing._tag).toBe("TranscriptError")
-      expect(missing.message).toContain("no session nope")
-    }).pipe(Effect.scoped, Effect.provide(Sqlite), Effect.runPromise))
+      const missing = yield* Effect.flip(transcript(Resume.Session({ id: SessionId.make("nope") }), "/resume/a"))
+      assert.strictEqual(missing._tag, "TranscriptError")
+      assert.include(missing.message, "no session nope")
+    }),
+  )
 
-  test("appends in flight together land in issue order", () =>
+  it.effect("appends in flight together land in issue order", () =>
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository
-      const session = yield* repository.createSession("/a")
+      const session = yield* repository.createSession("/order")
       const gate = yield* Deferred.make<void>()
       const order = yield* Ref.make<ReadonlyArray<string>>([])
       // The real repository with latency on the first append only: the second must still land behind it.
-      const slow = Layer.succeed(TranscriptRepository, {
+      const slow = Layer.succeed(TranscriptRepository)({
         ...repository,
         append: (id, event) =>
           Effect.gen(function* () {
@@ -53,68 +58,68 @@ describe("SessionTranscript", () => {
             yield* repository.append(id, event)
           }),
       })
-      const bound = yield* transcript(Resume.Session({ id: session.id })).pipe(Effect.provide(slow))
+      const bound = yield* transcript(Resume.Session({ id: session.id }), "/order").pipe(Effect.provide(slow))
 
       const a = yield* Effect.forkChild(bound.append(prompt))
       const b = yield* Effect.forkChild(bound.append(ended))
       yield* Effect.yieldNow
-      expect(yield* Ref.get(order)).toEqual([])
+      assert.deepStrictEqual(yield* Ref.get(order), [])
       yield* Deferred.succeed(gate, undefined)
       yield* Fiber.join(a)
       yield* Fiber.join(b)
 
-      expect(yield* Ref.get(order)).toEqual(["PromptAccepted", "TurnEnded"])
-      expect(yield* repository.events(session.id)).toEqual([prompt, ended])
-    }).pipe(Effect.scoped, Effect.provide(Sqlite), Effect.runPromise))
+      assert.deepStrictEqual(yield* Ref.get(order), ["PromptAccepted", "TurnEnded"])
+      assert.deepStrictEqual(yield* repository.events(session.id), [prompt, ended])
+    }),
+  )
 })
 
-describe("SqlTranscriptRepository", () => {
-  test("sessions belong to a directory, newest first; a missing session is NoSuchElementError", () =>
+layer(Sqlite, { excludeTestServices: true })("TranscriptRepository.Sql", (it) => {
+  it.effect("sessions belong to a directory, newest first; a missing session is NoSuchElementError", () =>
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository
-      const first = yield* repository.createSession("/a")
-      const second = yield* repository.createSession("/a")
-      yield* repository.createSession("/b")
+      const first = yield* repository.createSession("/sessions/a")
+      const second = yield* repository.createSession("/sessions/a")
+      yield* repository.createSession("/sessions/b")
 
-      expect((yield* repository.sessions("/a")).map((s) => s.id)).toEqual([second.id, first.id])
-      expect(yield* repository.sessions("/none")).toEqual([])
-      expect(yield* repository.findSession(first.id)).toEqual(first)
-      expect((yield* Effect.flip(repository.findSession(SessionId.make("nope"))))._tag).toBe("NoSuchElementError")
-    }).pipe(Effect.scoped, Effect.provide(Sqlite), Effect.runPromise))
+      assert.deepStrictEqual((yield* repository.sessions("/sessions/a")).map((s) => s.id), [second.id, first.id])
+      assert.deepStrictEqual(yield* repository.sessions("/sessions/none"), [])
+      assert.deepStrictEqual(yield* repository.findSession(first.id), first)
+      assert.isTrue(Cause.isNoSuchElementError(yield* Effect.flip(repository.findSession(SessionId.make("nope")))))
+    }),
+  )
 
-  test("a row that is not a ConversationEvent is a TranscriptError, not a value", () =>
+  it.effect("a row that is not a ConversationEvent is a TranscriptError, not a value", () =>
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository
       const sql = yield* SqlClient.SqlClient
-      const session = yield* repository.createSession("/a")
+      const session = yield* repository.createSession("/bogus")
       yield* repository.append(session.id, prompt)
       yield* sql`INSERT INTO events (session_id, kind, body, created_at) VALUES (${session.id}, ${"Bogus"}, ${'{"_tag":"Bogus"}'}, ${0})`
 
       const error = yield* Effect.flip(repository.events(session.id))
-      expect(error._tag).toBe("TranscriptError")
-      expect(error.message).toContain("SchemaError")
-    }).pipe(Effect.scoped, Effect.provide(Sqlite), Effect.runPromise))
-
-  test("two clients on one file see each other's sessions; migrations run once", async () => {
-    const filename = `/tmp/q-transcript-${crypto.randomUUID()}.db`
-    const client = () => SqlTranscriptRepository.pipe(Layer.provideMerge(SqliteClient.layer({ filename })))
-    try {
-      await Effect.gen(function* () {
-        const a = yield* Layer.build(client())
-        const b = yield* Layer.build(client())
-        const [repoA, repoB] = [Context.get(a, TranscriptRepository), Context.get(b, TranscriptRepository)]
-        const session = yield* repoA.createSession("/shared")
-        yield* repoA.append(session.id, prompt)
-        yield* repoB.append(session.id, ended)
-        expect(yield* repoA.events(session.id)).toEqual([prompt, ended])
-        expect(yield* repoB.sessions("/shared")).toEqual([session])
-
-        const sql = Context.get(b, SqlClient.SqlClient)
-        expect(yield* sql<{ n: number }>`SELECT COUNT(*) AS n FROM q_migrations`).toEqual([{ n: 1 }])
-      }).pipe(Effect.scoped, Effect.runPromise)
-    } finally {
-      const { rm } = await import("node:fs/promises")
-      await Promise.all([filename, `${filename}-wal`, `${filename}-shm`].map((f) => rm(f, { force: true })))
-    }
-  })
+      assert.strictEqual(error._tag, "TranscriptError")
+      assert.include(error.message, "SchemaError")
+    }),
+  )
 })
+
+it.live("two clients on one file see each other's sessions; migrations run once", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const directory = yield* fs.makeTempDirectoryScoped()
+    const client = () => TranscriptRepository.Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: `${directory}/q.db` })))
+
+    const a = yield* Layer.build(client())
+    const b = yield* Layer.build(client())
+    const [repoA, repoB] = [Context.get(a, TranscriptRepository), Context.get(b, TranscriptRepository)]
+    const session = yield* repoA.createSession("/shared")
+    yield* repoA.append(session.id, prompt)
+    yield* repoB.append(session.id, ended)
+    assert.deepStrictEqual(yield* repoA.events(session.id), [prompt, ended])
+    assert.deepStrictEqual(yield* repoB.sessions("/shared"), [session])
+
+    const sql = Context.get(b, SqlClient.SqlClient)
+    assert.deepStrictEqual(yield* sql<{ n: number }>`SELECT COUNT(*) AS n FROM q_migrations`, [{ n: 1 }])
+  }).pipe(Effect.provide(BunFileSystem.layer)),
+)

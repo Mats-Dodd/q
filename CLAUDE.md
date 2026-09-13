@@ -7,7 +7,7 @@ alwaysApply: false
 Default to using Bun instead of Node.js.
 
 - Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
+- Use `bun run test` (vitest on the Bun runtime) to run tests. Do not use `bun test` or `jest`.
 - Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
 - Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
 - Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
@@ -26,14 +26,27 @@ Default to using Bun instead of Node.js.
 
 ## Testing
 
-Use `bun test` to run tests.
+Tests are vitest with `@effect/vitest`, run on the Bun runtime: `bun run test` (`bun --bun vitest run`).
+OpenTUI's FFI and `bun:sqlite` need Bun; Node's vitest cannot host them. Config: `vitest.config.ts`.
+
+- `it.effect` runs an Effect test in its own Scope on a `TestClock` (and `TestConsole`). `it.live` uses the real clock.
+- `layer(L)("name", (it) => ...)` builds `L` once for the block; `it.layer(L2)` nests. `excludeTestServices: true` where the real clock matters (SQLite `created_at`, OpenTUI frames).
+- Substitutes are `Layer.succeed(Service)(impl)` or `Layer.mock`, provided inside the test body with `Effect.provide`.
+- Assert with `assert` from `@effect/vitest`; `expect` only for snapshots.
+- Time is `TestClock.adjust`. Completion is a message on `Runtime.messages`: fork the wait before the dispatch, join after. Never sleep or count yields.
 
 ```ts#index.test.ts
-import { test, expect } from "bun:test";
+import { assert, it, layer } from "@effect/vitest"
+import { Effect } from "effect"
 
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+layer(Foo.layer)("Foo", (it) => {
+  it.effect("adds context", () =>
+    Effect.gen(function* () {
+      const foo = yield* Foo
+      assert.strictEqual(foo, "foo")
+    }),
+  )
+})
 ```
 
 ## Frontend

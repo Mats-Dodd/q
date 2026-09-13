@@ -9,14 +9,17 @@
   "scripts": {
     "start": "bun apps/q/index.tsx",
     "build": "bun apps/q/build.ts",
-    "test": "bun test",
+    "test": "bun --bun vitest run",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@effect/vitest": "4.0.0-rc.115",
+    "@types/bun": "latest",
+    "vite-plugin-solid": "^2.11.14",
+    "vitest": "5.0.0"
   },
   "overrides": {
-    "@effect/platform-node-shared": "4.0.0-rc.112"
+    "@effect/platform-node-shared": "4.0.0-rc.115"
   },
   "peerDependencies": {
     "typescript": "^7"

@@ -13,19 +13,19 @@ const version = "0.0.0"
 
 /** `--db` is shared: subcommands read it by yielding `q`. */
 const q = Command.make("q", {
-  continue: Flag.boolean("continue").pipe(
+  continue: Flag.Boolean("continue").pipe(
     Flag.withAlias("c"),
     Flag.withDefault(false),
     Flag.withDescription("Resume the latest session started in this directory."),
   ),
-  resume: Flag.string("resume").pipe(
+  resume: Flag.String("resume").pipe(
     Flag.withAlias("r"),
     Flag.optional,
     Flag.withDescription("Resume the session with this id. See `q sessions`."),
   ),
 }).pipe(
   Command.withSharedFlags({
-    db: Flag.path("db").pipe(
+    db: Flag.Path("db").pipe(
       Flag.withFallbackConfig(DbPath),
       Flag.withDescription("SQLite file that holds every session. Also read from Q_DB; defaults under XDG_DATA_HOME."),
     ),

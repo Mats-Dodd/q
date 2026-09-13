@@ -27,6 +27,7 @@
     "noPropertyAccessFromIndexSignature": false
   },
   "include": [
+    "vitest.config.ts",
     "packages/*/src",
     "packages/*/test",
     "apps/*/**/*"

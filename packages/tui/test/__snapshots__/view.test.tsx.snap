@@ -1,6 +1,6 @@
-// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`view typing a prompt and pressing Enter echoes it back 1`] = `
+exports[`view > typing a prompt and pressing Enter echoes it back 1`] = `
 " you › hello
  q › hello
 

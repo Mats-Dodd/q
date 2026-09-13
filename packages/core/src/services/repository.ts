@@ -15,20 +15,6 @@ export class TranscriptError extends Data.TaggedError("TranscriptError")<{ reado
   }
 }
 
-export class TranscriptRepository extends Context.Service<
-  TranscriptRepository,
-  {
-    readonly createSession: (cwd: string) => Effect.Effect<Session, TranscriptError>
-    /** Sessions started in `cwd`, newest first. */
-    readonly sessions: (cwd: string) => Effect.Effect<ReadonlyArray<Session>, TranscriptError>
-    /** Fails with `NoSuchElementError` when there is no such session. */
-    readonly findSession: (id: SessionId) => Effect.Effect<Session, TranscriptError | Cause.NoSuchElementError>
-    readonly append: (id: SessionId, event: ConversationEvent) => Effect.Effect<void, TranscriptError>
-    /** The events of one session in append order. */
-    readonly events: (id: SessionId) => Effect.Effect<ReadonlyArray<ConversationEvent>, TranscriptError>
-  }
->()("TranscriptRepository") {}
-
 // ROWS
 
 const EventJson = Schema.fromJsonString(ConversationEvent)
@@ -65,13 +51,28 @@ const orTranscriptError = <A, E, R>(self: Effect.Effect<A, E, R>) =>
     (cause) => Effect.fail(new TranscriptError({ cause })),
   )
 
-/**
- * The repository over any `SqlClient`. Runs its migrations when the Layer is built. The SQL is
- * SQLite's dialect; the composition root binds the client.
- */
-export const SqlTranscriptRepository: Layer.Layer<TranscriptRepository, TranscriptError, SqlClient.SqlClient> =
-  Layer.effect(
+// SERVICE
+
+export class TranscriptRepository extends Context.Service<
+  TranscriptRepository,
+  {
+    readonly createSession: (cwd: string) => Effect.Effect<Session, TranscriptError>
+    /** Sessions started in `cwd`, newest first. */
+    readonly sessions: (cwd: string) => Effect.Effect<ReadonlyArray<Session>, TranscriptError>
+    /** Fails with `NoSuchElementError` when there is no such session. */
+    readonly findSession: (id: SessionId) => Effect.Effect<Session, TranscriptError | Cause.NoSuchElementError>
+    readonly append: (id: SessionId, event: ConversationEvent) => Effect.Effect<void, TranscriptError>
+    /** The events of one session in append order. */
+    readonly events: (id: SessionId) => Effect.Effect<ReadonlyArray<ConversationEvent>, TranscriptError>
+  }
+>()("TranscriptRepository") {
+  /**
+   * The repository over any `SqlClient`. Runs its migrations when the Layer is built. The SQL is
+   * SQLite's dialect; the composition root binds the client.
+   */
+  static readonly Sql: Layer.Layer<TranscriptRepository, TranscriptError, SqlClient.SqlClient> = Layer.effect(
     TranscriptRepository,
+  )(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* Migrator.make({})({ loader: migrations, table: "q_migrations" })
@@ -121,3 +122,4 @@ export const SqlTranscriptRepository: Layer.Layer<TranscriptRepository, Transcri
       return { createSession, sessions, findSession, append, events }
     }).pipe(orTranscriptError),
   )
+}
