@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The q binary. Composition root: picks the Layers and renders the TUI.",
+  "description": "The q binary. Composition root: runs or reaches the server, and renders the TUI.",
   "scripts": {
     "start": "bun index.tsx",
     "build": "bun build.ts"
@@ -12,7 +12,9 @@
     "@effect/platform-bun": "4.0.0-rc.115",
     "@effect/sql-sqlite-bun": "4.0.0-rc.115",
     "@opentui/solid": "0.5.10",
+    "@q/client": "workspace:*",
     "@q/core": "workspace:*",
+    "@q/server": "workspace:*",
     "@q/tui": "workspace:*",
     "effect": "4.0.0-rc.115"
   }

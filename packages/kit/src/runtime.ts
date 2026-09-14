@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, PubSub, Queue, Schema, Scope, Stream } from "effect"
+import { Cause, Effect, Exit, PubSub, Queue, Scope, Stream } from "effect"
 
 import type { Command } from "./command"
 import type { Program } from "./program"
@@ -21,6 +21,12 @@ export interface Runtime<Model, Msg> {
   readonly messages: Stream.Stream<Msg>
   /** Live stream of Model changes, from the point of subscription. */
   readonly models: Stream.Stream<Model>
+  /**
+   * The current Model, then every change after it. The subscription is taken before the Model is
+   * read, so a change can arrive twice but never be missed. For observers that want the whole
+   * state without a gap, e.g. a remote view.
+   */
+  readonly follow: Stream.Stream<Model>
   /** True once the runtime has crashed. */
   readonly crashed: () => boolean
 }
@@ -130,8 +136,8 @@ export const make = <Model, Msg, R, Flags>(
 
     const runCommand = (command: Command<Msg, R>) =>
       Effect.forkIn(
-        command.effect.pipe(
-          Effect.flatMap((message) => Effect.sync(() => dispatch(message))),
+        command.stream.pipe(
+          Stream.runForEach((message) => Effect.sync(() => dispatch(message))),
           Effect.catchCause(crashWith),
         ),
         inner,
@@ -149,7 +155,6 @@ export const make = <Model, Msg, R, Flags>(
     )
 
     for (const subscription of Object.values(program.subscriptions ?? {})) {
-      const equivalence = Schema.toEquivalence(subscription.deps)
       // Subscribe here, synchronously, before any dispatch can publish: a Stream.fromPubSub
       // inside the forked fiber would subscribe later and miss the first model changes.
       const modelChanges = yield* PubSub.subscribe(models)
@@ -158,7 +163,7 @@ export const make = <Model, Msg, R, Flags>(
           Stream.make(subscription.modelToDeps(model)),
           Stream.fromSubscription(modelChanges).pipe(Stream.map(subscription.modelToDeps)),
         ).pipe(
-          Stream.changesWith(equivalence),
+          Stream.changes,
           Stream.switchMap(subscription.depsToStream),
           Stream.runForEach((message) => Effect.sync(() => dispatch(message))),
           Effect.catchCause(crashWith),
@@ -170,11 +175,19 @@ export const make = <Model, Msg, R, Flags>(
 
     for (const command of initial.commands ?? []) Queue.offerUnsafe(commands, command)
 
+    // Subscribe first, read second: a change between the two is delivered twice, never dropped.
+    const follow = Stream.unwrap(
+      Effect.map(PubSub.subscribe(models), (subscription) =>
+        Stream.concat(Stream.make(model), Stream.fromSubscription(subscription)),
+      ),
+    )
+
     return {
       dispatch,
       model: () => model,
       messages: Stream.fromPubSub(log),
       models: Stream.fromPubSub(models),
+      follow,
       crashed: () => crashed,
     }
   })

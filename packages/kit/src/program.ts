@@ -22,10 +22,3 @@ export interface Program<Model, Msg, R = never, Flags = void> {
   readonly update: Update<Model, Msg, R>
   readonly subscriptions?: Readonly<Record<string, Subscription<Model, Msg, R>>>
 }
-
-/** Fold a message log over `update`. Used by tests to prove `update` is pure: replaying what the runtime saw reproduces its Model. */
-export const replay = <Model, Msg, R>(
-  update: Update<Model, Msg, R>,
-  initial: Model,
-  messages: ReadonlyArray<Msg>,
-): Model => messages.reduce((model, message) => update(model, message).model, initial)

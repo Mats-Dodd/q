@@ -1,9 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Deferred, Effect, Exit, Fiber, Schema, Scope, Stream } from "effect"
+import { Deferred, Effect, Exit, Fiber, Schedule, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { Message, type Model, program } from "./counter.fixture"
-import { type Return, replay } from "../src/program"
+import * as Command from "../src/command"
+import type { Return } from "../src/program"
 import * as Runtime from "../src/runtime"
 import * as Subscription from "../src/subscription"
 
@@ -21,7 +22,8 @@ describe("runtime", () => {
 
       const messages = yield* Fiber.join(log)
       assert.deepStrictEqual(messages, [Message.cases.ClickedIncrement.make({}), Message.cases.ClickedIncrement.make({})])
-      assert.deepStrictEqual(replay(program.update, program.init().model, messages), runtime.model())
+      const replayed = messages.reduce((model, message) => program.update(model, message).model, program.init().model)
+      assert.deepStrictEqual(replayed, runtime.model())
     }),
   )
 
@@ -103,7 +105,6 @@ describe("runtime", () => {
       let crashes = 0
 
       const Exploding = Subscription.make<Model, Message>()({
-        deps: Schema.Boolean,
         modelToDeps: (model) => model.isResetting,
         depsToStream: (isResetting) => (isResetting ? Stream.fromEffect(Effect.die("boom")) : Stream.empty),
       })
@@ -144,6 +145,44 @@ describe("runtime", () => {
 
       yield* TestClock.adjust("10 seconds")
       assert.strictEqual(completed, 0)
+    }),
+  )
+
+  it.effect("follow emits the current model first, then every change", () =>
+    Effect.gen(function* () {
+      const runtime = yield* Runtime.make(program)
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
+      const seen = yield* Effect.forkChild(Stream.runCollect(Stream.take(runtime.follow, 3)), { startImmediately: true })
+
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
+      assert.deepStrictEqual(
+        (yield* Fiber.join(seen)).map((m) => m.count),
+        [1, 2, 3],
+      )
+    }),
+  )
+
+  it.effect("a streaming command dispatches each element in order", () =>
+    Effect.gen(function* () {
+      const Count = Command.defineStream("Count", ({ to }: { to: number }) =>
+        Stream.range(1, to).pipe(
+          Stream.map(() => Message.cases.ClickedIncrement.make({})),
+          Stream.schedule(Schedule.spaced("1 second")),
+        ),
+      )
+      const runtime = yield* Runtime.make({
+        ...program,
+        update: (model, message) =>
+          message._tag === "ClickedResetAfterDelay"
+            ? { model, commands: [Count({ to: message.seconds })] }
+            : program.update(model, message),
+      })
+      runtime.dispatch(Message.cases.ClickedResetAfterDelay.make({ seconds: 3 }))
+      yield* TestClock.adjust("1 second")
+      assert.strictEqual(runtime.model().count, 1)
+      yield* TestClock.adjust("2 seconds")
+      assert.strictEqual(runtime.model().count, 3)
     }),
   )
 

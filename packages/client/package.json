@@ -1,22 +1,19 @@
 {
-  "name": "@q/tui",
+  "name": "@q/client",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The terminal view over @q/client, on OpenTUI with Solid.",
+  "description": "A thin client program that mirrors one server session over HTTP and SSE, and the transports that reach it.",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@opentui/core": "0.5.10",
-    "@opentui/solid": "0.5.10",
-    "@q/client": "workspace:*",
     "@q/core": "workspace:*",
     "@q/kit": "workspace:*",
-    "effect": "4.0.0-rc.115",
-    "solid-js": "1.9.12"
+    "effect": "4.0.0-rc.115"
   },
   "devDependencies": {
+    "@effect/platform-bun": "4.0.0-rc.115",
     "@q/server": "workspace:*"
   }
 }

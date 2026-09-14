@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Option } from "effect"
 
-import { Program } from "@q/kit"
 import { expectCommands, expectNoCommands, given, meanwhile, message, model, resolve, story } from "@q/kit/testing"
 import { AcceptPrompt, CommitTurn } from "../src/command"
 import { ConversationEvent, Outcome } from "../src/domain/event"
@@ -233,7 +232,8 @@ it("the model is a fold over the message log", () => {
     Message.cases.PressedEscape.make({}),
     Message.cases.SucceededCommitTurn.make({ messageId: 3 }),
   ]
-  assert.deepStrictEqual(Program.replay(update, fresh(), log), {
+  const replayed = log.reduce((model, message) => update(model, message).model, fresh())
+  assert.deepStrictEqual(replayed, {
     messages: [
       { id: 0, role: "user", text: "ab" },
       { id: 1, role: "assistant", text: "ab" },

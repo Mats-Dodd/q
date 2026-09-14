@@ -1,4 +1,4 @@
-import { Effect, Option, Schema, Stream } from "effect"
+import { Effect, Option, Stream } from "effect"
 
 import { Subscription } from "@q/kit"
 import { type Model, Turn } from "./domain/model"
@@ -11,8 +11,6 @@ import { Agent } from "./services/agent"
 export const BATCH_WINDOW = "33 millis"
 /** Bounds the size of one update when a source is faster than the window. */
 export const BATCH_SIZE = 64
-
-const TurnDeps = Schema.Option(Schema.Struct({ messageId: Schema.Number, prompt: Schema.String }))
 
 /** Merge consecutive `ReceivedText` messages in one batch into one. Other messages pass through in order. */
 export const coalesce = (batch: ReadonlyArray<Message>): ReadonlyArray<Message> =>
@@ -32,7 +30,6 @@ export const coalesce = (batch: ReadonlyArray<Message>): ReadonlyArray<Message> 
  * message per frame, and the terminal message flushes with any pending text.
  */
 export const AgentTurn = Subscription.make<Model, Message>()({
-  deps: TurnDeps,
   modelToDeps: (model) =>
     Turn.match(model.turn, {
       Idle: () => Option.none(),

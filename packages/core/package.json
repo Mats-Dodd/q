@@ -3,16 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The q agent program: model, messages, transcript events, services, update and subscriptions. Headless.",
+  "description": "The q agent program: model, messages, transcript events, service tags, update and subscriptions, and the HTTP API contract. Headless and pure.",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
     "@q/kit": "workspace:*",
     "effect": "4.0.0-rc.115"
-  },
-  "devDependencies": {
-    "@effect/platform-bun": "4.0.0-rc.115",
-    "@effect/sql-sqlite-bun": "4.0.0-rc.115"
   }
 }
