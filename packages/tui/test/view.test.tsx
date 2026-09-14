@@ -1,31 +1,43 @@
 import { assert, expect, layer } from "@effect/vitest"
-import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { testRender } from "@opentui/solid"
-import { Duration, Effect, Layer } from "effect"
+import { Context, type Duration, Effect, FileSystem, Layer, Path } from "effect"
+import { Etag, HttpPlatform } from "effect/unstable/http"
 
-import { Agent, Resume, Transcript, TranscriptRepository } from "@q/core"
+import { Client, Transport, open } from "@q/client"
+import { Agent, Resume, TranscriptRepository } from "@q/core"
+import { Sessions, SessionsHandlers } from "@q/server"
 
 import { App } from "../src/view"
 
-// The screen over the real program, on a throwaway database built once for the block. The clock is
-// real: OpenTUI renders frames on it (`excludeTestServices`). Each test mounts its own `App` in the
-// test's Scope; closing the Scope destroys the renderer.
+// The screen over the client program, against a server in the same process. The clock is real:
+// OpenTUI renders frames on it (`excludeTestServices`). Each test mounts its own `App`, with its
+// own server, in the test's Scope; closing the Scope destroys the renderer.
 
-const Sqlite = TranscriptRepository.Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
+const Platform = Layer.mergeAll(Path.layer, Etag.layerWeak, HttpPlatform.layer).pipe(Layer.provideMerge(FileSystem.layerNoop({})))
 
 const trim = (frame: string) => frame.split("\n").map((line) => line.trimEnd()).join("\n")
 
-/** A transcript that never answers: the prompt stays pending. */
-const stuck = Layer.succeed(Transcript)({ append: () => Effect.never, load: Effect.succeed([]) })
-
-/** Mount `App` with an echo agent of `delay` and a new session on the block's repository. */
-const mount = (delay: Duration.Input | null, transcript?: Layer.Layer<Transcript, unknown>) =>
+/** A repository that never finishes an append: the prompt stays pending. */
+const stuck = Layer.effect(TranscriptRepository)(
   Effect.gen(function* () {
-    const context = yield* Effect.context<TranscriptRepository>()
-    const session = Transcript.Session(Resume.cases.New.make({}), "/test").pipe(Layer.provide(Layer.succeedContext(context)))
+    const memory = Context.get(yield* Layer.build(TranscriptRepository.Memory), TranscriptRepository)
+    return { ...memory, append: () => Effect.never }
+  }),
+)
+
+/** Mount `App` over a fresh server with an echo agent of `delay`, on a new session. */
+const mount = (delay: Duration.Input | null, repository: Layer.Layer<TranscriptRepository> = TranscriptRepository.Memory) =>
+  Effect.gen(function* () {
+    const server = yield* Layer.build(
+      SessionsHandlers.pipe(Layer.provide(Sessions.layer()), Layer.provide(Layer.mergeAll(Agent.Echo(delay), repository))),
+    )
+    const platform = yield* Effect.context<Layer.Success<typeof Platform>>()
+    const services = Context.merge(server, platform)
+    const session = yield* open(yield* Client.local.pipe(Effect.provide(services)), "/test", Resume.cases.New.make({}))
+    const transport = Transport.Local(session.id).pipe(Layer.provide(Layer.succeedContext(services)))
     return yield* Effect.acquireRelease(
       Effect.promise(() =>
-        testRender(() => <App layer={Layer.mergeAll(Agent.Echo(delay), transcript ?? session)} />, {
+        testRender(() => <App layer={transport} />, {
           width: 40,
           height: 9,
           kittyKeyboard: true,
@@ -41,11 +53,11 @@ const waitForFrame = (setup: Setup, predicate: (frame: string) => boolean) =>
   Effect.promise(() => setup.waitForFrame(predicate))
 const typeText = (setup: Setup, text: string) => Effect.promise(() => setup.mockInput.typeText(text))
 
-layer(Sqlite, { excludeTestServices: true })("view", (it) => {
+layer(Platform, { excludeTestServices: true })("view", (it) => {
   it.effect("typing a prompt and pressing Enter echoes it back", () =>
     Effect.gen(function* () {
       const setup = yield* mount(null)
-      yield* waitForFrame(setup, (frame) => frame.includes("Type a message and press Enter."))
+      yield* waitForFrame(setup, (frame) => frame.includes("Type a message and press Enter.") && frame.includes("Enter sends"))
 
       yield* typeText(setup, "hello")
       setup.mockInput.pressEnter()
@@ -58,10 +70,10 @@ layer(Sqlite, { excludeTestServices: true })("view", (it) => {
     }),
   )
 
-  it.effect("a prompt shows as pending while the transcript is still accepting it", () =>
+  it.effect("a prompt shows as pending while the server is still accepting it", () =>
     Effect.gen(function* () {
       const setup = yield* mount(null, stuck)
-      yield* waitForFrame(setup, (frame) => frame.includes("Type a message"))
+      yield* waitForFrame(setup, (frame) => frame.includes("Type a message") && frame.includes("Enter sends"))
       yield* typeText(setup, "hello")
       setup.mockInput.pressEnter()
       yield* waitForFrame(setup, (frame) => frame.includes("sending"))
@@ -76,7 +88,7 @@ layer(Sqlite, { excludeTestServices: true })("view", (it) => {
   it.effect("escape cancels a streaming turn; a refused submit keeps the draft", () =>
     Effect.gen(function* () {
       const setup = yield* mount("10 seconds")
-      yield* waitForFrame(setup, (frame) => frame.includes("Type a message"))
+      yield* waitForFrame(setup, (frame) => frame.includes("Type a message") && frame.includes("Enter sends"))
       yield* typeText(setup, "hi")
       setup.mockInput.pressEnter()
       yield* waitForFrame(setup, (frame) => frame.includes("streaming"))

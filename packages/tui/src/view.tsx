@@ -2,10 +2,12 @@ import { useKeyboard } from "@opentui/solid"
 import { Cause, type Layer, Option } from "effect"
 import { type Accessor, Index, Show, createSignal } from "solid-js"
 
-import { type Agent, type ChatMessage, Message, type Model, type Role, type Transcript, Turn, program } from "@q/core"
+import { Message, type Model, type Transport, canSubmit, program } from "@q/client"
+import { type ChatMessage, type Role, Turn } from "@q/core"
 import { type SolidProgram, createProgram } from "@q/kit/solid"
 
-// VIEW — a projection of the Model. Presentation state (the draft) stays in Solid.
+// VIEW — a projection of the client Model, which mirrors one server session. Presentation state
+// (the draft) stays in Solid.
 
 const colors = {
   user: "#7aa2f7",
@@ -16,8 +18,8 @@ const colors = {
 
 const label: Record<Role, string> = { user: "you", assistant: "q" }
 
-/** The whole screen. The caller is the composition root and supplies the Layers. A Layer that fails to build shows as a crash. */
-export const App = (props: { layer: Layer.Layer<Agent | Transcript, unknown> }) => {
+/** The whole screen. The caller is the composition root and supplies the transport. A Layer that fails to build shows as a crash. */
+export const App = (props: { layer: Layer.Layer<Transport, unknown> }) => {
   const { app, crash } = createProgram(program, props.layer)
   return (
     <Show
@@ -47,14 +49,37 @@ const Crashed = (props: { cause: Cause.Cause<unknown> }) => (
   </box>
 )
 
+/** What the status line says. One of these, in this order of importance. */
+type Status =
+  | { readonly _tag: "Notice"; readonly text: string }
+  | { readonly _tag: "Connecting" }
+  | { readonly _tag: "Sending" }
+  | { readonly _tag: "Streaming" }
+  | { readonly _tag: "Idle" }
+
+const status = (model: Model): Status => {
+  if (Option.isSome(model.notice)) return { _tag: "Notice", text: model.notice.value }
+  if (Option.isNone(model.remote)) return { _tag: "Connecting" }
+  if (Option.isSome(model.pending)) return { _tag: "Sending" }
+  return Turn.match(model.remote.value.turn, {
+    Idle: (): Status => ({ _tag: "Idle" }),
+    Accepting: (): Status => ({ _tag: "Sending" }),
+    Streaming: (): Status => ({ _tag: "Streaming" }),
+  })
+}
+
+/** The prompt on its way to the conversation: sent by this client, or being accepted by the server. */
+const pendingPrompt = (model: Model): Option.Option<string> =>
+  Option.orElse(model.pending, () =>
+    Option.flatMap(model.remote, (remote) => (remote.turn._tag === "Accepting" ? Option.some(remote.turn.prompt) : Option.none())),
+  )
+
 const Session = (props: { app: SolidProgram<Model, Message> }) => {
   const { select, dispatch } = props.app
-  const messages = select((model) => model.messages)
-  const turn = select((model) => model.turn)
-  const notice = select((model) => model.notice)
-  const canSubmit = select((model) => model.turn._tag === "Idle")
-  // The prompt being accepted, so the user sees their words before the transcript answers.
-  const pending = select((model) => (model.turn._tag === "Accepting" ? Option.some(model.turn.prompt) : Option.none()))
+  const messages = select((model) => Option.match(model.remote, { onNone: () => [], onSome: (remote) => remote.messages }))
+  const line = select(status)
+  const submittable = select(canSubmit)
+  const pending = select(pendingPrompt)
 
   useKeyboard((key) => {
     if (key.name === "escape") dispatch(Message.cases.PressedEscape.make({}))
@@ -63,8 +88,8 @@ const Session = (props: { app: SolidProgram<Model, Message> }) => {
   return (
     <box flexDirection="column" width="100%" height="100%">
       <Chat messages={messages} pending={pending} />
-      <StatusLine turn={turn} notice={notice} />
-      <Composer canSubmit={canSubmit} onSubmit={(text) => dispatch(Message.cases.SubmittedPrompt.make({ text }))} />
+      <StatusLine status={line} />
+      <Composer canSubmit={submittable} onSubmit={(text) => dispatch(Message.cases.SubmittedPrompt.make({ text }))} />
     </box>
   )
 }
@@ -81,7 +106,7 @@ const Chat = (props: { messages: Accessor<ReadonlyArray<ChatMessage>>; pending: 
   </scrollbox>
 )
 
-/** A prompt the transcript has not accepted yet. Presentation only: it is not in `messages`. */
+/** A prompt the conversation has not accepted yet. Presentation only: it is not in `messages`. */
 const PendingRow = (props: { prompt: string }) => (
   <text selectable={false} wrapMode="word" fg={colors.muted}>
     <span style={{ fg: colors.muted }}>{label.user}</span>
@@ -98,14 +123,23 @@ const Row = (props: { message: Accessor<ChatMessage> }) => (
   </text>
 )
 
-const StatusLine = (props: { turn: Accessor<Turn>; notice: Accessor<Option.Option<string>> }) => {
-  const text = () =>
-    Turn.match(props.turn(), {
-      Idle: () => Option.getOrElse(props.notice(), () => "Enter sends · Esc cancels · Ctrl+C quits"),
-      Accepting: () => "sending…",
-      Streaming: () => "streaming… Esc to cancel",
-    })
-  const color = () => (props.turn()._tag === "Idle" && Option.isSome(props.notice()) ? colors.danger : colors.muted)
+const StatusLine = (props: { status: Accessor<Status> }) => {
+  const text = () => {
+    const s = props.status()
+    switch (s._tag) {
+      case "Notice":
+        return s.text
+      case "Connecting":
+        return "connecting…"
+      case "Sending":
+        return "sending…"
+      case "Streaming":
+        return "streaming… Esc to cancel"
+      case "Idle":
+        return "Enter sends · Esc cancels · Ctrl+C quits"
+    }
+  }
+  const color = () => (props.status()._tag === "Notice" ? colors.danger : colors.muted)
   return (
     <box height={1} paddingLeft={1}>
       <text fg={color()}>{text()}</text>

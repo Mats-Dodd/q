@@ -4,16 +4,14 @@ import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Ref } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 
-import { ConversationEvent, Outcome } from "../src/domain/event"
-import { SessionId } from "../src/domain/session"
-import { TranscriptRepository } from "../src/services/repository"
-import { Resume, Transcript } from "../src/services/transcript"
+import { ConversationEvent, Outcome, Resume, SessionId, Transcript, TranscriptRepository } from "@q/core"
+import { SqlTranscriptRepository } from "../src/storage"
 
 // End to end over the real SQLite Layer. One throwaway database per block, built once; every test
 // works in its own `cwd`, so the tests do not depend on their order. The clock is real: `created_at`
 // orders sessions.
 
-const Sqlite = TranscriptRepository.Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
+const Sqlite = SqlTranscriptRepository.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
 
 /** The `Transcript` of one session, built in the test's Scope over the block's repository. */
 const transcript = (resume: Resume, cwd: string) =>
@@ -108,7 +106,7 @@ it.live("two clients on one file see each other's sessions; migrations run once"
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const directory = yield* fs.makeTempDirectoryScoped()
-    const client = () => TranscriptRepository.Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: `${directory}/q.db` })))
+    const client = () => SqlTranscriptRepository.pipe(Layer.provideMerge(SqliteClient.layer({ filename: `${directory}/q.db` })))
 
     const a = yield* Layer.build(client())
     const b = yield* Layer.build(client())

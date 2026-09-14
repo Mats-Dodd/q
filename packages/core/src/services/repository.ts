@@ -1,11 +1,11 @@
-import { Array, Cause, Context, Data, DateTime, Effect, Layer, Schema } from "effect"
-import { Migrator, SqlClient, SqlSchema } from "effect/unstable/sql"
+import { Array, Cause, Context, Data, DateTime, Effect, Layer, Option } from "effect"
 
-import { ConversationEvent } from "../domain/event"
+import type { ConversationEvent } from "../domain/event"
 import { type Session, SessionId } from "../domain/session"
 
-// TRANSCRIPT REPOSITORY — sessions and their events, in storage. The SQL lives here and nowhere else.
-// Parse, do not validate: rows become domain values at this boundary or they are a `TranscriptError`.
+// TRANSCRIPT REPOSITORY — sessions and their events, in storage. The tag lives here; the SQL Layer
+// lives in @q/server. Parse, do not validate: rows become domain values at this boundary or they are
+// a `TranscriptError`.
 
 /** Storage refused, or returned something that is not a transcript. `message` is for the notice line. */
 export class TranscriptError extends Data.TaggedError("TranscriptError")<{ readonly cause: unknown }> {
@@ -14,42 +14,6 @@ export class TranscriptError extends Data.TaggedError("TranscriptError")<{ reado
     return cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause)
   }
 }
-
-// ROWS
-
-const EventJson = Schema.fromJsonString(ConversationEvent)
-const EventRow = Schema.Struct({ body: EventJson })
-
-const SessionRow = Schema.Struct({ id: SessionId, cwd: Schema.String, created_at: Schema.DateTimeUtcFromMillis })
-const toSession = (row: typeof SessionRow.Type): Session => ({ id: row.id, cwd: row.cwd, createdAt: row.created_at })
-
-const migrations = Migrator.fromRecord({
-  "0001_init": Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    yield* sql`CREATE TABLE sessions (
-      id TEXT PRIMARY KEY,
-      cwd TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    )`
-    yield* sql`CREATE INDEX sessions_cwd ON sessions (cwd, created_at)`
-    yield* sql`CREATE TABLE events (
-      seq INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES sessions (id),
-      kind TEXT NOT NULL,
-      body TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    )`
-    yield* sql`CREATE INDEX events_session ON events (session_id, seq)`
-  }),
-})
-
-/** Everything that is not "no such row" is a `TranscriptError`. */
-const orTranscriptError = <A, E, R>(self: Effect.Effect<A, E, R>) =>
-  Effect.catchIf(
-    self,
-    (error): error is Exclude<E, Cause.NoSuchElementError> => !Cause.isNoSuchElementError(error),
-    (cause) => Effect.fail(new TranscriptError({ cause })),
-  )
 
 // SERVICE
 
@@ -66,60 +30,38 @@ export class TranscriptRepository extends Context.Service<
     readonly events: (id: SessionId) => Effect.Effect<ReadonlyArray<ConversationEvent>, TranscriptError>
   }
 >()("TranscriptRepository") {
-  /**
-   * The repository over any `SqlClient`. Runs its migrations when the Layer is built. The SQL is
-   * SQLite's dialect; the composition root binds the client.
-   */
-  static readonly Sql: Layer.Layer<TranscriptRepository, TranscriptError, SqlClient.SqlClient> = Layer.effect(
-    TranscriptRepository,
-  )(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      yield* Migrator.make({})({ loader: migrations, table: "q_migrations" })
-
-      const selectSessions = SqlSchema.findAll({
-        Request: Schema.Struct({ cwd: Schema.String }),
-        Result: SessionRow,
-        execute: ({ cwd }) => sql`SELECT id, cwd, created_at FROM sessions WHERE cwd = ${cwd} ORDER BY created_at DESC, rowid DESC`,
-      })
-      const selectSession = SqlSchema.findAll({
-        Request: Schema.Struct({ id: SessionId }),
-        Result: SessionRow,
-        execute: ({ id }) => sql`SELECT id, cwd, created_at FROM sessions WHERE id = ${id}`,
-      })
-      const selectEvents = SqlSchema.findAll({
-        Request: Schema.Struct({ id: SessionId }),
-        Result: EventRow,
-        execute: ({ id }) => sql`SELECT body FROM events WHERE session_id = ${id} ORDER BY seq`,
-      })
-      const encodeEvent = Schema.encodeEffect(EventJson)
-
-      const createSession = Effect.fn("TranscriptRepository.createSession")(function* (cwd: string) {
-        const session: Session = { id: SessionId.make(crypto.randomUUID()), cwd, createdAt: yield* DateTime.now }
-        yield* sql`INSERT INTO sessions (id, cwd, created_at) VALUES (${session.id}, ${cwd}, ${DateTime.toEpochMillis(session.createdAt)})`
-        return session
-      }, orTranscriptError)
-
-      const sessions = Effect.fn("TranscriptRepository.sessions")(function* (cwd: string) {
-        return Array.map(yield* selectSessions({ cwd }), toSession)
-      }, orTranscriptError)
-
-      const findSession = Effect.fn("TranscriptRepository.findSession")(
-        (id: SessionId) => selectSession({ id }).pipe(Effect.head, Effect.map(toSession)),
-        orTranscriptError,
-      )
-
-      const append = Effect.fn("TranscriptRepository.append")(function* (id: SessionId, event: ConversationEvent) {
-        const body = yield* encodeEvent(event)
-        const now = DateTime.toEpochMillis(yield* DateTime.now)
-        yield* sql`INSERT INTO events (session_id, kind, body, created_at) VALUES (${id}, ${event._tag}, ${body}, ${now})`
-      }, orTranscriptError)
-
-      const events = Effect.fn("TranscriptRepository.events")(function* (id: SessionId) {
-        return Array.map(yield* selectEvents({ id }), (row) => row.body)
-      }, orTranscriptError)
-
-      return { createSession, sessions, findSession, append, events }
-    }).pipe(orTranscriptError),
-  )
+  /** An in-memory repository. Nothing survives the Layer. For tests and throwaway sessions. */
+  static readonly Memory: Layer.Layer<TranscriptRepository> = Layer.sync(TranscriptRepository)(() => {
+    const sessions = new Map<SessionId, Session>()
+    const events = new Map<SessionId, Array<ConversationEvent>>()
+    const find = (id: SessionId) => Option.fromNullishOr(sessions.get(id))
+    return {
+      createSession: (cwd) =>
+        Effect.map(DateTime.now, (createdAt) => {
+          const session: Session = { id: SessionId.make(crypto.randomUUID()), cwd, createdAt }
+          sessions.set(session.id, session)
+          events.set(session.id, [])
+          return session
+        }),
+      sessions: (cwd) =>
+        Effect.sync(() =>
+          Array.fromIterable(sessions.values())
+            .filter((session) => session.cwd === cwd)
+            .reverse()
+            .sort((a, b) => DateTime.toEpochMillis(b.createdAt) - DateTime.toEpochMillis(a.createdAt)),
+        ),
+      findSession: (id) =>
+        Effect.suspend(() =>
+          Option.match(find(id), {
+            onNone: () => Effect.fail(new Cause.NoSuchElementError(`no session ${id}`)),
+            onSome: Effect.succeed,
+          }),
+        ),
+      append: (id, event) =>
+        Effect.sync(() => {
+          events.set(id, [...(events.get(id) ?? []), event])
+        }),
+      events: (id) => Effect.sync(() => events.get(id) ?? []),
+    }
+  })
 }

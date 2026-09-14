@@ -1,5 +1,5 @@
 import type { Command } from "./command"
-import type { Update } from "./program"
+import type { Return, Update } from "./program"
 
 /**
  * Story tests: drive `update` with Messages and assert on the Model, without running any
@@ -47,6 +47,10 @@ export const story = <Model, Msg, R>(
 
 export const given = <Model, Msg, R>(model: Model): Step<Model, Msg, R> => step(() => ({ model, commands: [] }))
 
+/** Start from what `init` returned: its Model, with its commands pending. */
+export const booted = <Model, Msg, R>(initial: Return<Model, Msg, R>): Step<Model, Msg, R> =>
+  step(() => ({ model: initial.model, commands: initial.commands ?? [] }))
+
 export const message = <Model, Msg, R>(msg: Msg): Step<Model, Msg, R> =>
   step((simulation, update) => {
     if (simulation.commands.length > 0) {
@@ -84,6 +88,16 @@ export const expectCommands = <Model, Msg, R>(...definitions: ReadonlyArray<Name
   })
 
 export const expectNoCommands = <Model, Msg, R>(): Step<Model, Msg, R> => expectCommands()
+
+/** Feed one Message from a pending streaming command through `update`, leaving the command pending. */
+export const emit = <Model, Msg, R>(definition: Named, result: Msg): Step<Model, Msg, R> =>
+  step((simulation, update) => {
+    if (!simulation.commands.some((c) => c.name === definition.name)) {
+      throw new Error(`No pending command named ${definition.name}; pending: ${names(simulation.commands)}`)
+    }
+    const next = update(simulation.model, result)
+    return { model: next.model, commands: [...simulation.commands, ...(next.commands ?? [])] }
+  })
 
 /** Drop the first pending command with this name and feed its result Message through `update`. */
 export const resolve = <Model, Msg, R>(definition: Named, result: Msg): Step<Model, Msg, R> =>

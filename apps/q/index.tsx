@@ -2,10 +2,10 @@ import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { render } from "@opentui/solid"
 import { Resume, SessionId, TranscriptRepository } from "@q/core"
 import { App } from "@q/tui"
-import { Console, DateTime, Effect, Option } from "effect"
+import { Console, DateTime, Effect, Layer, Option } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 
-import { AppLayer, DbPath, type Launch, Storage } from "./layer"
+import { DbPath, type Launch, Serve, Storage, TransportLayer } from "./layer"
 
 // ENTRY — parse the command line, pick the session, render. The only place that knows about flags.
 
@@ -23,6 +23,11 @@ const q = Command.make("q", {
     Flag.optional,
     Flag.withDescription("Resume the session with this id. See `q sessions`."),
   ),
+  server: Flag.String("server").pipe(
+    Flag.withAlias("s"),
+    Flag.optional,
+    Flag.withDescription("Talk to a running `q serve` at this URL instead of running the server in this process."),
+  ),
 }).pipe(
   Command.withSharedFlags({
     db: Flag.Path("db").pipe(
@@ -36,13 +41,31 @@ const q = Command.make("q", {
         onSome: (id) => Resume.cases.Session.make({ id: SessionId.make(id) }),
         onNone: () => (flags.continue ? Resume.cases.Latest.make({}) : Resume.cases.New.make({})),
       })
-      const launch: Launch = { db: flags.db, cwd: process.cwd(), resume }
-      // OpenTUI owns the process from here. The runtime Scope, and with it the database, closes when the screen does.
-      render(() => <App layer={AppLayer(launch)} />)
+      const launch: Launch = { db: flags.db, cwd: process.cwd(), resume, server: flags.server }
+      // OpenTUI owns the process from here. The runtime Scope, and with it the embedded server or the
+      // HTTP client, closes when the screen does.
+      render(() => <App layer={TransportLayer(launch)} />)
     }),
   ),
   Command.withDescription("A terminal coding agent."),
 )
+
+const serve = Command.make(
+  "serve",
+  {
+    port: Flag.Int("port").pipe(
+      Flag.withAlias("p"),
+      Flag.withDefault(7331),
+      Flag.withDescription("Port to listen on, on 127.0.0.1."),
+    ),
+  },
+  ({ port }) =>
+    Effect.gen(function* () {
+      const { db } = yield* q
+      yield* Console.log(`q serving http://127.0.0.1:${port} over ${db}`)
+      yield* Layer.launch(Serve(db, port))
+    }),
+).pipe(Command.withDescription("Run the server alone. Clients connect with `q --server URL`."))
 
 const listSessions = Effect.gen(function* () {
   const cwd = process.cwd()
@@ -63,6 +86,6 @@ const sessions = Command.make("sessions", {}, () =>
   }),
 ).pipe(Command.withDescription("List the sessions started in this directory, newest first."))
 
-const cli = q.pipe(Command.withSubcommands([sessions]))
+const cli = q.pipe(Command.withSubcommands([serve, sessions]))
 
 Command.run(cli, { version }).pipe(Effect.provide(BunServices.layer), BunRuntime.runMain())
