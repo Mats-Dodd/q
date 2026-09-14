@@ -15,7 +15,7 @@ export interface Flags {
   readonly events: ReadonlyArray<ConversationEvent>
 }
 
-const empty: Model = { messages: [], turn: Turn.Idle(), nextId: 0, notice: Option.none() }
+const empty: Model = { messages: [], turn: Turn.cases.Idle.make({}), nextId: 0, notice: Option.none() }
 
 /** A transcript that ends mid-turn was interrupted. The Model says so; repairing the transcript is a follow-up. */
 const INTERRUPTED = "[interrupted]"
@@ -43,7 +43,7 @@ const beginStreaming = (model: Model, prompt: string): Model => {
       { id: userId, role: "user", text: prompt },
       { id: assistantId, role: "assistant", text: "" },
     ] satisfies ReadonlyArray<ChatMessage>),
-    turn: () => Turn.Streaming({ messageId: assistantId, prompt }),
+    turn: () => Turn.cases.Streaming.make({ messageId: assistantId, prompt }),
     nextId: (n) => n + 2,
   })
 }
@@ -58,10 +58,10 @@ const appendText = (model: Model, messageId: number, chunk: string): Model =>
 const textOf = (model: Model, messageId: number): string =>
   model.messages.find((message) => message.id === messageId)?.text ?? ""
 
-const endTurn = (model: Model): Model => Struct.evolve(model, { turn: () => Turn.Idle() })
+const endTurn = (model: Model): Model => Struct.evolve(model, { turn: () => Turn.cases.Idle.make({}) })
 
 const endTurnWithNotice = (model: Model, notice: string): Model =>
-  Struct.evolve(model, { turn: () => Turn.Idle(), notice: () => Option.some(notice) })
+  Struct.evolve(model, { turn: () => Turn.cases.Idle.make({}), notice: () => Option.some(notice) })
 
 /**
  * End the turn now and record the outcome behind it. Leaving `Streaming` stops the agent;
@@ -82,7 +82,7 @@ export const update = (model: Model, message: Message): Return =>
       model.turn._tag !== "Idle" || text.trim() === ""
         ? { model }
         : {
-            model: Struct.evolve(model, { turn: () => Turn.Accepting({ prompt: text }), notice: () => Option.none() }),
+            model: Struct.evolve(model, { turn: () => Turn.cases.Accepting.make({ prompt: text }), notice: () => Option.none() }),
             commands: [AcceptPrompt({ prompt: text })],
           },
     SucceededAcceptPrompt: () =>
@@ -92,13 +92,13 @@ export const update = (model: Model, message: Message): Return =>
     ReceivedText: ({ messageId, text }) =>
       isStreaming(model, messageId) ? { model: appendText(model, messageId, text) } : { model },
     CompletedTurn: ({ messageId }) =>
-      isStreaming(model, messageId) ? commit(model, messageId, Outcome.Completed()) : { model },
+      isStreaming(model, messageId) ? commit(model, messageId, Outcome.cases.Completed.make({})) : { model },
     FailedTurn: ({ messageId, error }) =>
       isStreaming(model, messageId)
-        ? commit(appendText(model, messageId, ` [error: ${error}]`), messageId, Outcome.Failed({ error }))
+        ? commit(appendText(model, messageId, ` [error: ${error}]`), messageId, Outcome.cases.Failed.make({ error }))
         : { model },
     PressedEscape: () =>
-      model.turn._tag === "Streaming" ? commit(model, model.turn.messageId, Outcome.Cancelled()) : { model },
+      model.turn._tag === "Streaming" ? commit(model, model.turn.messageId, Outcome.cases.Cancelled.make({})) : { model },
     SucceededCommitTurn: () => ({ model }),
     // The turn is already over; a failed record is a notice, whatever the conversation is doing now.
     FailedCommitTurn: ({ error }) => ({ model: Struct.evolve(model, { notice: () => Option.some(`could not save turn: ${error}`) }) }),

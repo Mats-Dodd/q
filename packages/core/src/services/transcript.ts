@@ -1,6 +1,5 @@
-import { Cause, Context, Effect, Layer, Semaphore } from "effect"
+import { Cause, Context, Effect, Layer, Schema, Semaphore } from "effect"
 
-import { defineTaggedUnion } from "@q/kit"
 import type { ConversationEvent } from "../domain/event"
 import { SessionId } from "../domain/session"
 import { TranscriptError, TranscriptRepository } from "./repository"
@@ -10,7 +9,7 @@ import { TranscriptError, TranscriptRepository } from "./repository"
 export { TranscriptError }
 
 /** Which session a launch of `q` continues. Decided at the composition root, from the command line. */
-export const Resume = defineTaggedUnion({
+export const Resume = Schema.TaggedUnion({
   /** Start a new session. */
   New: {},
   /** The latest session for the working directory, or a new one if there is none. */

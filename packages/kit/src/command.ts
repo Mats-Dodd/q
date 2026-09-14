@@ -22,7 +22,7 @@ export type Definition<Name extends string, A extends Args, Msg, R> = {
  * Command inside `update` never runs anything.
  *
  *   const DelayReset = Command.define("DelayReset", ({ seconds }: { seconds: number }) =>
- *     Effect.as(Effect.sleep(`${seconds} seconds`), Message.CompletedDelayReset()))
+ *     Effect.as(Effect.sleep(`${seconds} seconds`), Message.cases.CompletedDelayReset.make({})))
  */
 export const define = <const Name extends string, A extends Args, Msg, R = never>(
   name: Name,

@@ -2,14 +2,13 @@ import { Effect, Schema, Struct } from "effect"
 
 import * as Command from "../src/command"
 import type { Program, Return } from "../src/program"
-import { defineMessageUnion } from "../src/schema"
 
 /** A tiny program with one Command, used by the kit's own tests. Mirrors Foldkit's counter. */
 
 export const Model = Schema.Struct({ count: Schema.Number, isResetting: Schema.Boolean })
 export type Model = typeof Model.Type
 
-export const Message = defineMessageUnion({
+export const Message = Schema.TaggedUnion({
   ClickedIncrement: {},
   ClickedResetAfterDelay: { seconds: Schema.Number },
   CompletedDelayReset: {},
@@ -17,7 +16,7 @@ export const Message = defineMessageUnion({
 export type Message = typeof Message.Type
 
 export const DelayReset = Command.define("DelayReset", ({ seconds }: { seconds: number }) =>
-  Effect.as(Effect.sleep(`${seconds} seconds`), Message.CompletedDelayReset()),
+  Effect.as(Effect.sleep(`${seconds} seconds`), Message.cases.CompletedDelayReset.make({})),
 )
 
 export const init = (): Return<Model, Message> => ({ model: { count: 0, isResetting: false } })

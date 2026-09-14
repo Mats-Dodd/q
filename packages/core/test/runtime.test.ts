@@ -26,7 +26,7 @@ const Shared = Layer.mergeAll(
   TranscriptRepository.Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" }))),
 )
 
-const session = Transcript.Session(Resume.New(), "/test")
+const session = Transcript.Session(Resume.cases.New.make({}), "/test")
 
 const assistantText = (runtime: Runtime.Runtime<Model, Message>) => runtime.model().messages[1]?.text
 
@@ -50,10 +50,10 @@ layer(Shared)("program", (it) => {
       const accept = yield* awaiting(runtime, accepted)
       const abc = yield* awaiting(runtime, received)
 
-      runtime.dispatch(Message.SubmittedPrompt({ text: "abcdef" }))
-      assert.deepStrictEqual(runtime.model().turn, Turn.Accepting({ prompt: "abcdef" }))
+      runtime.dispatch(Message.cases.SubmittedPrompt.make({ text: "abcdef" }))
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Accepting.make({ prompt: "abcdef" }))
       yield* Fiber.join(accept)
-      assert.deepStrictEqual(runtime.model().turn, Turn.Streaming({ messageId: 1, prompt: "abcdef" }))
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Streaming.make({ messageId: 1, prompt: "abcdef" }))
       assert.deepStrictEqual(runtime.model().messages.map((m) => m.text), ["abcdef", ""])
 
       yield* TestClock.adjust("33 millis")
@@ -62,13 +62,13 @@ layer(Shared)("program", (it) => {
       yield* TestClock.adjust("33 millis")
       const messages = yield* Fiber.join(log)
       assert.strictEqual(assistantText(runtime), "abcdef")
-      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Idle.make({}))
 
       assert.isTrue(messages.filter(received).length <= 2)
       assert.include(messages.map((m) => m._tag), "CompletedTurn")
       assert.deepStrictEqual(yield* loadTranscript, [
-        ConversationEvent.PromptAccepted({ prompt: "abcdef" }),
-        ConversationEvent.TurnEnded({ text: "abcdef", outcome: Outcome.Completed() }),
+        ConversationEvent.cases.PromptAccepted.make({ prompt: "abcdef" }),
+        ConversationEvent.cases.TurnEnded.make({ text: "abcdef", outcome: Outcome.cases.Completed.make({}) }),
       ])
       assert.deepStrictEqual(Program.replay(program.update, init({ events: [] }).model, messages), runtime.model())
     }).pipe(Effect.provide(session)),
@@ -81,20 +81,20 @@ layer(Shared)("program", (it) => {
       const abc = yield* awaiting(runtime, received)
       const commit = yield* awaiting(runtime, committed(1))
 
-      runtime.dispatch(Message.SubmittedPrompt({ text: "abcdef" }))
+      runtime.dispatch(Message.cases.SubmittedPrompt.make({ text: "abcdef" }))
       yield* Fiber.join(accept)
       yield* TestClock.adjust("33 millis")
       yield* Fiber.join(abc)
       assert.strictEqual(assistantText(runtime), "abc")
 
-      runtime.dispatch(Message.PressedEscape())
-      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      runtime.dispatch(Message.cases.PressedEscape.make({}))
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Idle.make({}))
       yield* Fiber.join(commit)
       yield* TestClock.adjust("1 second")
       assert.strictEqual(assistantText(runtime), "abc")
 
       const transcript = yield* loadTranscript
-      assert.deepStrictEqual(transcript.at(-1), ConversationEvent.TurnEnded({ text: "abc", outcome: Outcome.Cancelled() }))
+      assert.deepStrictEqual(transcript.at(-1), ConversationEvent.cases.TurnEnded.make({ text: "abc", outcome: Outcome.cases.Cancelled.make({}) }))
     }).pipe(Effect.provide(session)),
   )
 
@@ -104,14 +104,14 @@ layer(Shared)("program", (it) => {
       const accept = yield* awaiting(runtime, accepted)
       const second = yield* awaiting(runtime, committed(3))
 
-      runtime.dispatch(Message.SubmittedPrompt({ text: "ab" }))
+      runtime.dispatch(Message.cases.SubmittedPrompt.make({ text: "ab" }))
       yield* Fiber.join(accept)
-      runtime.dispatch(Message.PressedEscape())
-      runtime.dispatch(Message.SubmittedPrompt({ text: "xy" }))
+      runtime.dispatch(Message.cases.PressedEscape.make({}))
+      runtime.dispatch(Message.cases.SubmittedPrompt.make({ text: "xy" }))
       yield* TestClock.adjust("1 second")
       yield* Fiber.join(second)
       assert.deepStrictEqual(runtime.model().messages.map((m) => m.text), ["ab", "", "xy", "xy"])
-      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Idle.make({}))
     }).pipe(Effect.provide(session)),
   )
 
@@ -123,15 +123,15 @@ layer(Shared)("program", (it) => {
       const runtime = yield* Runtime.make(program).pipe(Effect.provide(failing))
       const commit = yield* awaiting(runtime, committed(1))
 
-      runtime.dispatch(Message.SubmittedPrompt({ text: "hi" }))
+      runtime.dispatch(Message.cases.SubmittedPrompt.make({ text: "hi" }))
       yield* TestClock.adjust("1 second")
       yield* Fiber.join(commit)
       assert.strictEqual(assistantText(runtime), "o [error: offline]")
-      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Idle.make({}))
       const transcript = yield* loadTranscript
       assert.deepStrictEqual(
         transcript.at(-1),
-        ConversationEvent.TurnEnded({ text: "o [error: offline]", outcome: Outcome.Failed({ error: "offline" }) }),
+        ConversationEvent.cases.TurnEnded.make({ text: "o [error: offline]", outcome: Outcome.cases.Failed.make({ error: "offline" }) }),
       )
     }).pipe(Effect.provide(session)),
   )
@@ -145,10 +145,10 @@ layer(Shared)("program", (it) => {
       const runtime = yield* Runtime.make(program).pipe(Effect.provide(readOnly))
       const refused = yield* awaiting(runtime, (m) => m._tag === "FailedAcceptPrompt")
 
-      runtime.dispatch(Message.SubmittedPrompt({ text: "hi" }))
+      runtime.dispatch(Message.cases.SubmittedPrompt.make({ text: "hi" }))
       yield* Fiber.join(refused)
       assert.deepStrictEqual(runtime.model().messages, [])
-      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Idle.make({}))
       assert.strictEqual(runtime.model().notice._tag, "Some")
     }),
   )
@@ -179,36 +179,36 @@ layer(Shared)("program", (it) => {
       const second = yield* awaiting(runtime, committed(3))
 
       yield* open
-      runtime.dispatch(Message.SubmittedPrompt({ text: "abcdef" }))
+      runtime.dispatch(Message.cases.SubmittedPrompt.make({ text: "abcdef" }))
       yield* Fiber.join(accept)
       yield* TestClock.adjust("33 millis")
       yield* Fiber.join(abc)
-      assert.deepStrictEqual(runtime.model().turn, Turn.Streaming({ messageId: 1, prompt: "abcdef" }))
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Streaming.make({ messageId: 1, prompt: "abcdef" }))
 
       // Hold the transcript while turn one finishes: the turn ends at once, its record is in flight.
       yield* close
       yield* TestClock.adjust("1 second")
       yield* Fiber.join(ended)
-      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Idle.make({}))
       assert.strictEqual(assistantText(runtime), "abcdef")
       assert.strictEqual((yield* Ref.get(events)).length, 1)
 
       // Turn two is not refused: it is accepted behind the held record.
-      runtime.dispatch(Message.SubmittedPrompt({ text: "xy" }))
+      runtime.dispatch(Message.cases.SubmittedPrompt.make({ text: "xy" }))
       yield* TestClock.adjust("1 second")
-      assert.deepStrictEqual(runtime.model().turn, Turn.Accepting({ prompt: "xy" }))
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Accepting.make({ prompt: "xy" }))
       assert.strictEqual(runtime.model().messages.length, 2)
 
       yield* open
       yield* TestClock.adjust("1 second")
       yield* Fiber.join(second)
       assert.deepStrictEqual(runtime.model().messages.map((m) => m.text), ["abcdef", "abcdef", "xy", "xy"])
-      assert.deepStrictEqual(runtime.model().turn, Turn.Idle())
+      assert.deepStrictEqual(runtime.model().turn, Turn.cases.Idle.make({}))
       assert.deepStrictEqual(yield* Ref.get(events), [
-        ConversationEvent.PromptAccepted({ prompt: "abcdef" }),
-        ConversationEvent.TurnEnded({ text: "abcdef", outcome: Outcome.Completed() }),
-        ConversationEvent.PromptAccepted({ prompt: "xy" }),
-        ConversationEvent.TurnEnded({ text: "xy", outcome: Outcome.Completed() }),
+        ConversationEvent.cases.PromptAccepted.make({ prompt: "abcdef" }),
+        ConversationEvent.cases.TurnEnded.make({ text: "abcdef", outcome: Outcome.cases.Completed.make({}) }),
+        ConversationEvent.cases.PromptAccepted.make({ prompt: "xy" }),
+        ConversationEvent.cases.TurnEnded.make({ text: "xy", outcome: Outcome.cases.Completed.make({}) }),
       ])
     }),
   )
@@ -220,20 +220,20 @@ layer(Shared)("program", (it) => {
       const first = yield* awaiting(live, committed(1))
       const second = yield* awaiting(live, committed(3))
 
-      live.dispatch(Message.SubmittedPrompt({ text: "abc" }))
+      live.dispatch(Message.cases.SubmittedPrompt.make({ text: "abc" }))
       yield* Fiber.join(acceptFirst)
       yield* TestClock.adjust("1 second")
       yield* Fiber.join(first)
 
       const acceptSecond = yield* awaiting(live, accepted)
       const def = yield* awaiting(live, (m) => received(m) && m.messageId === 3)
-      live.dispatch(Message.SubmittedPrompt({ text: "defg" }))
+      live.dispatch(Message.cases.SubmittedPrompt.make({ text: "defg" }))
       yield* Fiber.join(acceptSecond)
       yield* TestClock.adjust("33 millis")
       yield* Fiber.join(def)
-      live.dispatch(Message.PressedEscape())
+      live.dispatch(Message.cases.PressedEscape.make({}))
       yield* Fiber.join(second)
-      assert.deepStrictEqual(live.model().turn, Turn.Idle())
+      assert.deepStrictEqual(live.model().turn, Turn.cases.Idle.make({}))
 
       const restored = yield* Runtime.make(program)
       assert.deepStrictEqual(restored.model(), live.model())
@@ -245,13 +245,13 @@ layer(Shared)("program", (it) => {
 describe("coalesce", () => {
   it("merges adjacent text for the same row and keeps terminal messages in order", () => {
     const batch = [
-      Message.ReceivedText({ messageId: 1, text: "a" }),
-      Message.ReceivedText({ messageId: 1, text: "b" }),
-      Message.CompletedTurn({ messageId: 1 }),
+      Message.cases.ReceivedText.make({ messageId: 1, text: "a" }),
+      Message.cases.ReceivedText.make({ messageId: 1, text: "b" }),
+      Message.cases.CompletedTurn.make({ messageId: 1 }),
     ]
     assert.deepStrictEqual(coalesce(batch), [
-      Message.ReceivedText({ messageId: 1, text: "ab" }),
-      Message.CompletedTurn({ messageId: 1 }),
+      Message.cases.ReceivedText.make({ messageId: 1, text: "ab" }),
+      Message.cases.CompletedTurn.make({ messageId: 1 }),
     ])
     assert.deepStrictEqual(coalesce([]), [])
   })

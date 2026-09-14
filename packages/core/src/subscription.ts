@@ -19,7 +19,7 @@ export const coalesce = (batch: ReadonlyArray<Message>): ReadonlyArray<Message> 
   batch.reduce<Array<Message>>((out, message) => {
     const last = out.at(-1)
     if (message._tag === "ReceivedText" && last?._tag === "ReceivedText" && last.messageId === message.messageId) {
-      out[out.length - 1] = Message.ReceivedText({ messageId: last.messageId, text: last.text + message.text })
+      out[out.length - 1] = Message.cases.ReceivedText.make({ messageId: last.messageId, text: last.text + message.text })
     } else {
       out.push(message)
     }
@@ -45,9 +45,9 @@ export const AgentTurn = Subscription.make<Model, Message>()({
       Stream.unwrap(
         Effect.map(Agent, (agent) =>
           agent.stream(prompt).pipe(
-            Stream.map((text) => Message.ReceivedText({ messageId, text })),
-            Stream.concat(Stream.make(Message.CompletedTurn({ messageId }))),
-            Stream.catch((error) => Stream.make(Message.FailedTurn({ messageId, error: error.message }))),
+            Stream.map((text) => Message.cases.ReceivedText.make({ messageId, text })),
+            Stream.concat(Stream.make(Message.cases.CompletedTurn.make({ messageId }))),
+            Stream.catch((error) => Stream.make(Message.cases.FailedTurn.make({ messageId, error: error.message }))),
             Stream.groupedWithin(BATCH_SIZE, BATCH_WINDOW),
             Stream.flatMap((batch) => Stream.fromIterable(coalesce(batch))),
           ),

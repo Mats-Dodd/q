@@ -33,8 +33,8 @@ const q = Command.make("q", {
   Command.withHandler((flags) =>
     Effect.sync(() => {
       const resume: Resume = Option.match(flags.resume, {
-        onSome: (id) => Resume.Session({ id: SessionId.make(id) }),
-        onNone: () => (flags.continue ? Resume.Latest() : Resume.New()),
+        onSome: (id) => Resume.cases.Session.make({ id: SessionId.make(id) }),
+        onNone: () => (flags.continue ? Resume.cases.Latest.make({}) : Resume.cases.New.make({})),
       })
       const launch: Launch = { db: flags.db, cwd: process.cwd(), resume }
       // OpenTUI owns the process from here. The runtime Scope, and with it the database, closes when the screen does.

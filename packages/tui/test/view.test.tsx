@@ -22,7 +22,7 @@ const stuck = Layer.succeed(Transcript)({ append: () => Effect.never, load: Effe
 const mount = (delay: Duration.Input | null, transcript?: Layer.Layer<Transcript, unknown>) =>
   Effect.gen(function* () {
     const context = yield* Effect.context<TranscriptRepository>()
-    const session = Transcript.Session(Resume.New(), "/test").pipe(Layer.provide(Layer.succeedContext(context)))
+    const session = Transcript.Session(Resume.cases.New.make({}), "/test").pipe(Layer.provide(Layer.succeedContext(context)))
     return yield* Effect.acquireRelease(
       Effect.promise(() =>
         testRender(() => <App layer={Layer.mergeAll(Agent.Echo(delay), transcript ?? session)} />, {

@@ -19,24 +19,24 @@ const Sqlite = TranscriptRepository.Sql.pipe(Layer.provideMerge(SqliteClient.lay
 const transcript = (resume: Resume, cwd: string) =>
   Effect.map(Layer.build(Transcript.Session(resume, cwd)), (context) => Context.get(context, Transcript))
 
-const prompt = ConversationEvent.PromptAccepted({ prompt: "hi" })
-const ended = ConversationEvent.TurnEnded({ text: "hi", outcome: Outcome.Failed({ error: "boom" }) })
+const prompt = ConversationEvent.cases.PromptAccepted.make({ prompt: "hi" })
+const ended = ConversationEvent.cases.TurnEnded.make({ text: "hi", outcome: Outcome.cases.Failed.make({ error: "boom" }) })
 
 layer(Sqlite, { excludeTestServices: true })("Transcript.Session", (it) => {
   it.effect("New starts empty; Latest resumes it per directory; Session by id; an unknown id fails the Layer", () =>
     Effect.gen(function* () {
-      const fresh = yield* transcript(Resume.New(), "/resume/a")
+      const fresh = yield* transcript(Resume.cases.New.make({}), "/resume/a")
       assert.deepStrictEqual(yield* fresh.load, [])
       yield* fresh.append(prompt)
       yield* fresh.append(ended)
 
-      assert.deepStrictEqual(yield* (yield* transcript(Resume.Latest(), "/resume/a")).load, [prompt, ended])
-      assert.deepStrictEqual(yield* (yield* transcript(Resume.Latest(), "/resume/b")).load, [])
+      assert.deepStrictEqual(yield* (yield* transcript(Resume.cases.Latest.make({}), "/resume/a")).load, [prompt, ended])
+      assert.deepStrictEqual(yield* (yield* transcript(Resume.cases.Latest.make({}), "/resume/b")).load, [])
 
       const [session] = yield* (yield* TranscriptRepository).sessions("/resume/a")
-      assert.deepStrictEqual(yield* (yield* transcript(Resume.Session({ id: session!.id }), "/resume/a")).load, [prompt, ended])
+      assert.deepStrictEqual(yield* (yield* transcript(Resume.cases.Session.make({ id: session!.id }), "/resume/a")).load, [prompt, ended])
 
-      const missing = yield* Effect.flip(transcript(Resume.Session({ id: SessionId.make("nope") }), "/resume/a"))
+      const missing = yield* Effect.flip(transcript(Resume.cases.Session.make({ id: SessionId.make("nope") }), "/resume/a"))
       assert.strictEqual(missing._tag, "TranscriptError")
       assert.include(missing.message, "no session nope")
     }),
@@ -58,7 +58,7 @@ layer(Sqlite, { excludeTestServices: true })("Transcript.Session", (it) => {
             yield* repository.append(id, event)
           }),
       })
-      const bound = yield* transcript(Resume.Session({ id: session.id }), "/order").pipe(Effect.provide(slow))
+      const bound = yield* transcript(Resume.cases.Session.make({ id: session.id }), "/order").pipe(Effect.provide(slow))
 
       const a = yield* Effect.forkChild(bound.append(prompt))
       const b = yield* Effect.forkChild(bound.append(ended))

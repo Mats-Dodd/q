@@ -1,7 +1,5 @@
 import { Schema } from "effect"
 
-import { defineTaggedUnion } from "@q/kit"
-
 // MODEL
 
 export const Role = Schema.Literals(["user", "assistant"])
@@ -19,7 +17,7 @@ export type ChatMessage = typeof ChatMessage.Type
  * only after the transcript has accepted it, and that wait is the `Accepting` state. The end
  * of a turn is write-behind: leaving `Streaming` records the outcome asynchronously.
  */
-export const Turn = defineTaggedUnion({
+export const Turn = Schema.TaggedUnion({
   Idle: {},
   /** `PromptAccepted` is being appended to the transcript. The view may show the prompt as pending. */
   Accepting: { prompt: Schema.String },

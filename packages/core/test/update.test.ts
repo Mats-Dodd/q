@@ -16,8 +16,8 @@ const streaming = (): Model =>
   story(
     update,
     given(fresh()),
-    message(Message.SubmittedPrompt({ text: "hi" })),
-    resolve(AcceptPrompt, Message.SucceededAcceptPrompt()),
+    message(Message.cases.SubmittedPrompt.make({ text: "hi" })),
+    resolve(AcceptPrompt, Message.cases.SucceededAcceptPrompt.make({})),
   ).model
 
 const unchanged = (before: Model, msg: Message) => assert.strictEqual(update(before, msg).model, before)
@@ -27,26 +27,26 @@ describe("write-ahead turn", () => {
     story(
       update,
       given(fresh()),
-      message(Message.SubmittedPrompt({ text: "hello" })),
+      message(Message.cases.SubmittedPrompt.make({ text: "hello" })),
       model((m) => {
         assert.deepStrictEqual(m.messages, [])
-        assert.deepStrictEqual(m.turn, Turn.Accepting({ prompt: "hello" }))
+        assert.deepStrictEqual(m.turn, Turn.cases.Accepting.make({ prompt: "hello" }))
       }),
       expectCommands(AcceptPrompt),
-      resolve(AcceptPrompt, Message.SucceededAcceptPrompt()),
+      resolve(AcceptPrompt, Message.cases.SucceededAcceptPrompt.make({})),
       model((m) => {
         assert.deepStrictEqual(m.messages, [
           { id: 0, role: "user", text: "hello" },
           { id: 1, role: "assistant", text: "" },
         ])
-        assert.deepStrictEqual(m.turn, Turn.Streaming({ messageId: 1, prompt: "hello" }))
+        assert.deepStrictEqual(m.turn, Turn.cases.Streaming.make({ messageId: 1, prompt: "hello" }))
         assert.strictEqual(m.nextId, 2)
       }),
     )
   })
 
   it("the accept command carries the prompt", () => {
-    const [command] = update(fresh(), Message.SubmittedPrompt({ text: "hello" })).commands ?? []
+    const [command] = update(fresh(), Message.cases.SubmittedPrompt.make({ text: "hello" })).commands ?? []
     assert.strictEqual(command?.name, "AcceptPrompt")
     assert.deepStrictEqual(command?.args, { prompt: "hello" })
   })
@@ -55,16 +55,16 @@ describe("write-ahead turn", () => {
     story(
       update,
       given(fresh()),
-      message(Message.SubmittedPrompt({ text: "hello" })),
-      resolve(AcceptPrompt, Message.FailedAcceptPrompt({ error: "disk full" })),
+      message(Message.cases.SubmittedPrompt.make({ text: "hello" })),
+      resolve(AcceptPrompt, Message.cases.FailedAcceptPrompt.make({ error: "disk full" })),
       model((m) => {
         assert.deepStrictEqual(m.messages, [])
-        assert.deepStrictEqual(m.turn, Turn.Idle())
+        assert.deepStrictEqual(m.turn, Turn.cases.Idle.make({}))
         assert.deepStrictEqual(m.notice, Option.some("could not save prompt: disk full"))
       }),
-      message(Message.SubmittedPrompt({ text: "again" })),
+      message(Message.cases.SubmittedPrompt.make({ text: "again" })),
       model((m) => assert.deepStrictEqual(m.notice, Option.none())),
-      resolve(AcceptPrompt, Message.SucceededAcceptPrompt()),
+      resolve(AcceptPrompt, Message.cases.SucceededAcceptPrompt.make({})),
     )
   })
 
@@ -72,45 +72,45 @@ describe("write-ahead turn", () => {
     story(
       update,
       given(streaming()),
-      message(Message.ReceivedText({ messageId: 1, text: "he" })),
-      message(Message.ReceivedText({ messageId: 1, text: "llo" })),
-      message(Message.CompletedTurn({ messageId: 1 })),
+      message(Message.cases.ReceivedText.make({ messageId: 1, text: "he" })),
+      message(Message.cases.ReceivedText.make({ messageId: 1, text: "llo" })),
+      message(Message.cases.CompletedTurn.make({ messageId: 1 })),
       model((m) => {
         assert.strictEqual(m.messages[1]?.text, "hello")
-        assert.deepStrictEqual(m.turn, Turn.Idle())
+        assert.deepStrictEqual(m.turn, Turn.cases.Idle.make({}))
       }),
       expectCommands(CommitTurn),
-      resolve(CommitTurn, Message.SucceededCommitTurn({ messageId: 1 })),
-      model((m) => assert.deepStrictEqual(m.turn, Turn.Idle())),
+      resolve(CommitTurn, Message.cases.SucceededCommitTurn.make({ messageId: 1 })),
+      model((m) => assert.deepStrictEqual(m.turn, Turn.cases.Idle.make({}))),
     )
   })
 
   it("a saved turn is a fact the model does not need", () => {
-    const idle = update(streaming(), Message.CompletedTurn({ messageId: 1 })).model
-    unchanged(idle, Message.SucceededCommitTurn({ messageId: 1 }))
+    const idle = update(streaming(), Message.cases.CompletedTurn.make({ messageId: 1 })).model
+    unchanged(idle, Message.cases.SucceededCommitTurn.make({ messageId: 1 }))
   })
 
   it("the commit command carries the text and outcome", () => {
-    const withText = update(streaming(), Message.ReceivedText({ messageId: 1, text: "partial" })).model
-    const [command] = update(withText, Message.PressedEscape()).commands ?? []
+    const withText = update(streaming(), Message.cases.ReceivedText.make({ messageId: 1, text: "partial" })).model
+    const [command] = update(withText, Message.cases.PressedEscape.make({})).commands ?? []
     assert.strictEqual(command?.name, "CommitTurn")
-    assert.deepStrictEqual(command?.args, { messageId: 1, text: "partial", outcome: Outcome.Cancelled() })
+    assert.deepStrictEqual(command?.args, { messageId: 1, text: "partial", outcome: Outcome.cases.Cancelled.make({}) })
   })
 
   it("an agent failure records the error on the row and commits a failed outcome", () => {
-    const [command] = update(streaming(), Message.FailedTurn({ messageId: 1, error: "offline" })).commands ?? []
-    assert.deepStrictEqual(command?.args, { messageId: 1, text: " [error: offline]", outcome: Outcome.Failed({ error: "offline" }) })
+    const [command] = update(streaming(), Message.cases.FailedTurn.make({ messageId: 1, error: "offline" })).commands ?? []
+    assert.deepStrictEqual(command?.args, { messageId: 1, text: " [error: offline]", outcome: Outcome.cases.Failed.make({ error: "offline" }) })
   })
 
   it("a failed commit is a notice; the row stays", () => {
     story(
       update,
       given(streaming()),
-      message(Message.CompletedTurn({ messageId: 1 })),
-      resolve(CommitTurn, Message.FailedCommitTurn({ messageId: 1, error: "timeout" })),
+      message(Message.cases.CompletedTurn.make({ messageId: 1 })),
+      resolve(CommitTurn, Message.cases.FailedCommitTurn.make({ messageId: 1, error: "timeout" })),
       model((m) => {
         assert.strictEqual(m.messages.length, 2)
-        assert.deepStrictEqual(m.turn, Turn.Idle())
+        assert.deepStrictEqual(m.turn, Turn.cases.Idle.make({}))
         assert.deepStrictEqual(m.notice, Option.some("could not save turn: timeout"))
       }),
     )
@@ -120,19 +120,19 @@ describe("write-ahead turn", () => {
     const next = story(
       update,
       given(streaming()),
-      message(Message.CompletedTurn({ messageId: 1 })),
-      meanwhile(Message.SubmittedPrompt({ text: "next" })),
-      resolve(AcceptPrompt, Message.SucceededAcceptPrompt()),
-      resolve(CommitTurn, Message.FailedCommitTurn({ messageId: 1, error: "timeout" })),
+      message(Message.cases.CompletedTurn.make({ messageId: 1 })),
+      meanwhile(Message.cases.SubmittedPrompt.make({ text: "next" })),
+      resolve(AcceptPrompt, Message.cases.SucceededAcceptPrompt.make({})),
+      resolve(CommitTurn, Message.cases.FailedCommitTurn.make({ messageId: 1, error: "timeout" })),
     ).model
-    assert.deepStrictEqual(next.turn, Turn.Streaming({ messageId: 3, prompt: "next" }))
+    assert.deepStrictEqual(next.turn, Turn.cases.Streaming.make({ messageId: 3, prompt: "next" }))
     assert.strictEqual(next.messages.length, 4)
     assert.deepStrictEqual(next.notice, Option.some("could not save turn: timeout"))
   })
 
   it("tokens append to the assistant row and leave every other row untouched by reference", () => {
     const before = streaming()
-    const after = update(before, Message.ReceivedText({ messageId: 1, text: "h" })).model
+    const after = update(before, Message.cases.ReceivedText.make({ messageId: 1, text: "h" })).model
     assert.strictEqual(after.messages[1]?.text, "h")
     assert.strictEqual(after.messages[0], before.messages[0]!)
     assert.strictEqual(after.turn, before.turn)
@@ -141,48 +141,48 @@ describe("write-ahead turn", () => {
 
 describe("messages that do not fit the current state are ignored by reference", () => {
   it("blank prompt, prompt while not idle", () => {
-    unchanged(fresh(), Message.SubmittedPrompt({ text: "   " }))
-    const accepting = update(fresh(), Message.SubmittedPrompt({ text: "one" })).model
-    unchanged(accepting, Message.SubmittedPrompt({ text: "two" }))
-    unchanged(streaming(), Message.SubmittedPrompt({ text: "two" }))
+    unchanged(fresh(), Message.cases.SubmittedPrompt.make({ text: "   " }))
+    const accepting = update(fresh(), Message.cases.SubmittedPrompt.make({ text: "one" })).model
+    unchanged(accepting, Message.cases.SubmittedPrompt.make({ text: "two" }))
+    unchanged(streaming(), Message.cases.SubmittedPrompt.make({ text: "two" }))
   })
 
   it("escape while idle or accepting", () => {
-    unchanged(fresh(), Message.PressedEscape())
-    unchanged(update(fresh(), Message.SubmittedPrompt({ text: "one" })).model, Message.PressedEscape())
-    unchanged(update(streaming(), Message.CompletedTurn({ messageId: 1 })).model, Message.PressedEscape())
+    unchanged(fresh(), Message.cases.PressedEscape.make({}))
+    unchanged(update(fresh(), Message.cases.SubmittedPrompt.make({ text: "one" })).model, Message.cases.PressedEscape.make({}))
+    unchanged(update(streaming(), Message.cases.CompletedTurn.make({ messageId: 1 })).model, Message.cases.PressedEscape.make({}))
   })
 
   it("text, completion and failure for a foreign or finished turn", () => {
     const live = streaming()
-    unchanged(live, Message.ReceivedText({ messageId: 0, text: "x" }))
-    unchanged(live, Message.ReceivedText({ messageId: 99, text: "x" }))
-    unchanged(live, Message.CompletedTurn({ messageId: 99 }))
-    unchanged(live, Message.FailedTurn({ messageId: 99, error: "x" }))
+    unchanged(live, Message.cases.ReceivedText.make({ messageId: 0, text: "x" }))
+    unchanged(live, Message.cases.ReceivedText.make({ messageId: 99, text: "x" }))
+    unchanged(live, Message.cases.CompletedTurn.make({ messageId: 99 }))
+    unchanged(live, Message.cases.FailedTurn.make({ messageId: 99, error: "x" }))
 
-    const ended = update(live, Message.PressedEscape()).model
-    unchanged(ended, Message.ReceivedText({ messageId: 1, text: "late" }))
-    unchanged(ended, Message.CompletedTurn({ messageId: 1 }))
-    unchanged(ended, Message.FailedTurn({ messageId: 1, error: "late" }))
+    const ended = update(live, Message.cases.PressedEscape.make({})).model
+    unchanged(ended, Message.cases.ReceivedText.make({ messageId: 1, text: "late" }))
+    unchanged(ended, Message.cases.CompletedTurn.make({ messageId: 1 }))
+    unchanged(ended, Message.cases.FailedTurn.make({ messageId: 1, error: "late" }))
   })
 
   it("a stale completion from a cancelled turn cannot end the next turn", () => {
     const second = story(
       update,
       given(streaming()),
-      message(Message.PressedEscape()),
-      resolve(CommitTurn, Message.SucceededCommitTurn({ messageId: 1 })),
-      message(Message.SubmittedPrompt({ text: "next" })),
-      resolve(AcceptPrompt, Message.SucceededAcceptPrompt()),
-      model((m) => assert.deepStrictEqual(m.turn, Turn.Streaming({ messageId: 3, prompt: "next" }))),
+      message(Message.cases.PressedEscape.make({})),
+      resolve(CommitTurn, Message.cases.SucceededCommitTurn.make({ messageId: 1 })),
+      message(Message.cases.SubmittedPrompt.make({ text: "next" })),
+      resolve(AcceptPrompt, Message.cases.SucceededAcceptPrompt.make({})),
+      model((m) => assert.deepStrictEqual(m.turn, Turn.cases.Streaming.make({ messageId: 3, prompt: "next" }))),
     )
-    unchanged(second.model, Message.CompletedTurn({ messageId: 1 }))
-    unchanged(second.model, Message.SucceededCommitTurn({ messageId: 1 }))
+    unchanged(second.model, Message.cases.CompletedTurn.make({ messageId: 1 }))
+    unchanged(second.model, Message.cases.SucceededCommitTurn.make({ messageId: 1 }))
   })
 
   it("accept results while idle", () => {
-    unchanged(fresh(), Message.SucceededAcceptPrompt())
-    unchanged(fresh(), Message.FailedAcceptPrompt({ error: "x" }))
+    unchanged(fresh(), Message.cases.SucceededAcceptPrompt.make({}))
+    unchanged(fresh(), Message.cases.FailedAcceptPrompt.make({ error: "x" }))
   })
 })
 
@@ -190,10 +190,10 @@ describe("init folds the transcript", () => {
   it("completed turns become rows, and the model is idle", () => {
     const m = init({
       events: [
-        ConversationEvent.PromptAccepted({ prompt: "ab" }),
-        ConversationEvent.TurnEnded({ text: "AB", outcome: Outcome.Completed() }),
-        ConversationEvent.PromptAccepted({ prompt: "c" }),
-        ConversationEvent.TurnEnded({ text: "", outcome: Outcome.Cancelled() }),
+        ConversationEvent.cases.PromptAccepted.make({ prompt: "ab" }),
+        ConversationEvent.cases.TurnEnded.make({ text: "AB", outcome: Outcome.cases.Completed.make({}) }),
+        ConversationEvent.cases.PromptAccepted.make({ prompt: "c" }),
+        ConversationEvent.cases.TurnEnded.make({ text: "", outcome: Outcome.cases.Cancelled.make({}) }),
       ],
     }).model
     assert.deepStrictEqual(m, {
@@ -203,35 +203,35 @@ describe("init folds the transcript", () => {
         { id: 2, role: "user", text: "c" },
         { id: 3, role: "assistant", text: "" },
       ],
-      turn: Turn.Idle(),
+      turn: Turn.cases.Idle.make({}),
       nextId: 4,
       notice: Option.none(),
     })
   })
 
   it("a transcript that ends mid-turn is marked interrupted", () => {
-    const m = init({ events: [ConversationEvent.PromptAccepted({ prompt: "ab" })] }).model
+    const m = init({ events: [ConversationEvent.cases.PromptAccepted.make({ prompt: "ab" })] }).model
     assert.strictEqual(m.messages[1]?.text, "[interrupted]")
-    assert.deepStrictEqual(m.turn, Turn.Idle())
+    assert.deepStrictEqual(m.turn, Turn.cases.Idle.make({}))
   })
 
   it("a stray TurnEnded is ignored", () => {
-    assert.deepStrictEqual(init({ events: [ConversationEvent.TurnEnded({ text: "x", outcome: Outcome.Completed() })] }).model, fresh())
+    assert.deepStrictEqual(init({ events: [ConversationEvent.cases.TurnEnded.make({ text: "x", outcome: Outcome.cases.Completed.make({}) })] }).model, fresh())
   })
 })
 
 it("the model is a fold over the message log", () => {
   const log = [
-    Message.SubmittedPrompt({ text: "ab" }),
-    Message.SucceededAcceptPrompt(),
-    Message.ReceivedText({ messageId: 1, text: "a" }),
-    Message.ReceivedText({ messageId: 1, text: "b" }),
-    Message.CompletedTurn({ messageId: 1 }),
-    Message.SucceededCommitTurn({ messageId: 1 }),
-    Message.SubmittedPrompt({ text: "c" }),
-    Message.SucceededAcceptPrompt(),
-    Message.PressedEscape(),
-    Message.SucceededCommitTurn({ messageId: 3 }),
+    Message.cases.SubmittedPrompt.make({ text: "ab" }),
+    Message.cases.SucceededAcceptPrompt.make({}),
+    Message.cases.ReceivedText.make({ messageId: 1, text: "a" }),
+    Message.cases.ReceivedText.make({ messageId: 1, text: "b" }),
+    Message.cases.CompletedTurn.make({ messageId: 1 }),
+    Message.cases.SucceededCommitTurn.make({ messageId: 1 }),
+    Message.cases.SubmittedPrompt.make({ text: "c" }),
+    Message.cases.SucceededAcceptPrompt.make({}),
+    Message.cases.PressedEscape.make({}),
+    Message.cases.SucceededCommitTurn.make({ messageId: 3 }),
   ]
   assert.deepStrictEqual(Program.replay(update, fresh(), log), {
     messages: [
@@ -240,7 +240,7 @@ it("the model is a fold over the message log", () => {
       { id: 2, role: "user", text: "c" },
       { id: 3, role: "assistant", text: "" },
     ],
-    turn: Turn.Idle(),
+    turn: Turn.cases.Idle.make({}),
     nextId: 4,
     notice: Option.none(),
   })

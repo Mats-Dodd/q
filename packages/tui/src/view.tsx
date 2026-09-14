@@ -57,14 +57,14 @@ const Session = (props: { app: SolidProgram<Model, Message> }) => {
   const pending = select((model) => (model.turn._tag === "Accepting" ? Option.some(model.turn.prompt) : Option.none()))
 
   useKeyboard((key) => {
-    if (key.name === "escape") dispatch(Message.PressedEscape())
+    if (key.name === "escape") dispatch(Message.cases.PressedEscape.make({}))
   })
 
   return (
     <box flexDirection="column" width="100%" height="100%">
       <Chat messages={messages} pending={pending} />
       <StatusLine turn={turn} notice={notice} />
-      <Composer canSubmit={canSubmit} onSubmit={(text) => dispatch(Message.SubmittedPrompt({ text }))} />
+      <Composer canSubmit={canSubmit} onSubmit={(text) => dispatch(Message.cases.SubmittedPrompt.make({ text }))} />
     </box>
   )
 }

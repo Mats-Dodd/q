@@ -15,12 +15,12 @@ describe("runtime", () => {
       const runtime = yield* Runtime.make(program)
       const log = yield* Effect.forkChild(Stream.runCollect(Stream.take(runtime.messages, 2)), { startImmediately: true })
 
-      runtime.dispatch(Message.ClickedIncrement())
-      runtime.dispatch(Message.ClickedIncrement())
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
       assert.strictEqual(runtime.model().count, 2)
 
       const messages = yield* Fiber.join(log)
-      assert.deepStrictEqual(messages, [Message.ClickedIncrement(), Message.ClickedIncrement()])
+      assert.deepStrictEqual(messages, [Message.cases.ClickedIncrement.make({}), Message.cases.ClickedIncrement.make({})])
       assert.deepStrictEqual(replay(program.update, program.init().model, messages), runtime.model())
     }),
   )
@@ -32,8 +32,8 @@ describe("runtime", () => {
         Stream.runHead(Stream.filter(runtime.messages, (m) => m._tag === "CompletedDelayReset")),
         { startImmediately: true },
       )
-      runtime.dispatch(Message.ClickedIncrement())
-      runtime.dispatch(Message.ClickedResetAfterDelay({ seconds: 2 }))
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
+      runtime.dispatch(Message.cases.ClickedResetAfterDelay.make({ seconds: 2 }))
       assert.deepStrictEqual(runtime.model(), { count: 1, isResetting: true })
 
       yield* TestClock.adjust("1 second")
@@ -50,8 +50,8 @@ describe("runtime", () => {
       const runtime = yield* Runtime.make(program)
       const models = yield* Effect.forkChild(Stream.runCollect(Stream.take(runtime.models, 2)), { startImmediately: true })
 
-      runtime.dispatch(Message.ClickedIncrement())
-      runtime.dispatch(Message.ClickedIncrement())
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
       assert.deepStrictEqual(yield* Fiber.join(models), [
         { count: 1, isResetting: false },
         { count: 2, isResetting: false },
@@ -70,7 +70,7 @@ describe("runtime", () => {
         },
         onModel: (model) => seen.push(model.count),
       })
-      runtime.dispatch(Message.ClickedIncrement())
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
       assert.deepStrictEqual(seen, [1])
       assert.strictEqual(batches, 1)
     }),
@@ -88,8 +88,8 @@ describe("runtime", () => {
         startImmediately: true,
       })
 
-      runtime.dispatch(Message.ClickedIncrement())
-      runtime.dispatch(Message.ClickedIncrement())
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
       assert.strictEqual(crashes, 1)
       assert.isTrue(runtime.crashed())
       yield* Effect.yieldNow
@@ -116,7 +116,7 @@ describe("runtime", () => {
           },
         },
       )
-      runtime.dispatch(Message.ClickedResetAfterDelay({ seconds: 1 }))
+      runtime.dispatch(Message.cases.ClickedResetAfterDelay.make({ seconds: 1 }))
       yield* Deferred.await(crashed)
 
       // The DelayReset command was interrupted with the runtime: time passing does not complete it.
@@ -126,7 +126,7 @@ describe("runtime", () => {
       assert.isTrue(runtime.model().isResetting)
 
       // Dispatch after a crash is dropped.
-      runtime.dispatch(Message.ClickedIncrement())
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
       assert.strictEqual(runtime.model().count, 0)
     }),
   )
@@ -138,7 +138,7 @@ describe("runtime", () => {
       const runtime = yield* Runtime.make(program, { onModel: (m) => { if (!m.isResetting) completed += 1 } }).pipe(
         Scope.provide(scope),
       )
-      runtime.dispatch(Message.ClickedResetAfterDelay({ seconds: 5 }))
+      runtime.dispatch(Message.cases.ClickedResetAfterDelay.make({ seconds: 5 }))
       yield* TestClock.adjust("1 second")
       yield* Scope.close(scope, Exit.void)
 
@@ -155,7 +155,7 @@ describe("runtime", () => {
         flags: Effect.sync(() => { loads += 1; return 40 }),
         init: (count: number) => ({ model: { count, isResetting: false } }),
       })
-      runtime.dispatch(Message.ClickedIncrement())
+      runtime.dispatch(Message.cases.ClickedIncrement.make({}))
       assert.strictEqual(runtime.model().count, 41)
       assert.strictEqual(loads, 1)
     }),

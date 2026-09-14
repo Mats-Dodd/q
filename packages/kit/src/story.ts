@@ -8,9 +8,9 @@ import type { Update } from "./program"
  *
  *   story(update,
  *     given(init().model),
- *     message(Message.ClickedResetAfterDelay()),
+ *     message(Message.cases.ClickedResetAfterDelay.make({})),
  *     expectCommands(DelayReset),
- *     resolve(DelayReset, Message.CompletedDelayReset()),
+ *     resolve(DelayReset, Message.cases.CompletedDelayReset.make({})),
  *     model((m) => expect(m.count).toBe(0)))
  */
 export interface Simulation<Model, Msg, R> {

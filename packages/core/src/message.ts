@@ -1,10 +1,8 @@
 import { Schema } from "effect"
 
-import { defineMessageUnion } from "@q/kit"
-
 // MESSAGE — inputs to `update`, named as past-tense facts. Transient, never persisted.
 
-export const Message = defineMessageUnion({
+export const Message = Schema.TaggedUnion({
   SubmittedPrompt: { text: Schema.String },
   SucceededAcceptPrompt: {},
   FailedAcceptPrompt: { error: Schema.String },
