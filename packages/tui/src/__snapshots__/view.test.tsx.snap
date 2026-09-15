@@ -1,5 +1,31 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`a tool call is a line of its own; an approval request takes y or n from the keyboard 1`] = `
+" you › email bob
+ q › ⚙ send_email({"to":"bob@example.
+ com","subject":"hi","body":"hello"}) →
+ approve? y / n
+
+ approve send_email? y / n · Esc cancels
+╭──────────────────────────────────────╮
+│ Type a message…                      │
+╰──────────────────────────────────────╯
+"
+`;
+
+exports[`a tool call is a line of its own; an approval request takes y or n from the keyboard 2`] = `
+" you › email bob
+ q › ⚙ send_email({"to":"bob@example.
+ com","subject":"hi","body":"hello"}) →
+ {"sent":true,"to":"bob@example.com"}
+     Sent.
+ Enter sends · Esc cancels · Ctrl+C
+╭──────────────────────────────────────╮
+│ Type a message…                      │
+╰──────────────────────────────────────╯
+"
+`;
+
 exports[`typing a prompt and pressing Enter echoes it back 1`] = `
 " you › hello
  q › hello

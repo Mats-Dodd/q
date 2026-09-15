@@ -1,0 +1,24 @@
+{
+  "name": "effect-ai-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The AI SDK UI message stream protocol for Effect: UIMessage and UIMessageChunk schemas typed from a Toolkit, an adapter from LanguageModel stream parts, a pure reducer, UIMessage to Prompt, and SSE.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./ModelMessages": "./src/model-messages.ts",
+    "./Sse": "./src/sse.ts",
+    "./UIMessage": "./src/ui-message.ts",
+    "./UIMessageChunk": "./src/ui-message-chunk.ts",
+    "./UIMessageReducer": "./src/ui-message-reducer.ts",
+    "./UIMessageStream": "./src/ui-message-stream.ts",
+    "./UIMessageStreamError": "./src/ui-message-stream-error.ts"
+  },
+  "devDependencies": {
+    "effect": "4.0.0-rc.115"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.115"
+  }
+}

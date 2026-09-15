@@ -1,16 +1,29 @@
 import { assert, describe, it } from "@effect/vitest"
-import { type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
+import type { AgentTools } from "@q/domain/agent/tools"
+import { type ChatChunk, type ChatMessagePart, type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
 import { ConversationEventSchema, OutcomeSchema } from "@q/domain/transcript/model"
-import { expectCommands, given, meanwhile, message, model, resolve, story } from "@q/kit/story"
+import {
+  makeDeniedChunk,
+  makeEmailApprovalChunks,
+  makeEmailSentChunk,
+  makeTextChunks,
+  makeWeatherCallChunks,
+} from "@q/factories/chat-chunk"
+import { makeStepEnded, makeTurnEnded } from "@q/factories/conversation-event"
+import { makeAssistantMessage, makeTextStep, makeUserMessage } from "@q/factories/conversation-model"
+import { type Step, expectCommands, given, meanwhile, message, model, resolve, story } from "@q/kit/story"
 import { Option } from "effect"
+import { type AnyToolUIPart, isToolUIPart } from "effect-ai-ui/UIMessage"
 
-import { AcceptPrompt, CommitTurn } from "./command"
+import type { CurrentSession } from "../session/current-session"
+import type { TranscriptService } from "../transcript/transcript-service"
+import { AcceptPrompt, CommitStep, CommitTurn } from "./command"
 import { type Message, MessageSchema } from "./message"
 import { init, update } from "./update"
 
 const fresh = () => init({ events: [] }).model
 
-/** Drive a fresh model to `Streaming` on the prompt "hi": rows 0 (user) and 1 (assistant). */
+/** Drive a fresh model to `Streaming` on the prompt "hi": messages "0" (user) and "1" (assistant), round 0. */
 const streaming = (): ConversationModel =>
   story(
     update,
@@ -20,6 +33,39 @@ const streaming = (): ConversationModel =>
   ).model
 
 const unchanged = (before: ConversationModel, msg: Message) => assert.strictEqual(update(before, msg).model, before)
+
+type StoryStep = Step<ConversationModel, Message, CurrentSession | TranscriptService>
+
+const chunk = (chunk: ChatChunk, round = 0, messageId = "1") => MessageSchema.cases.ReceivedChunk.make({ messageId, round, chunk })
+const chunks = (all: ReadonlyArray<ChatChunk>, round = 0): ReadonlyArray<StoryStep> => all.map((c) => message(chunk(c, round)))
+const startStep = (round = 0) => chunk({ type: "start-step" }, round)
+const finishStep = (round = 0) => chunk({ type: "finish-step" }, round)
+
+/** Feed `model` one whole step. */
+const step = (model: ConversationModel, all: ReadonlyArray<ChatChunk>, round = 0): ConversationModel =>
+  [startStep(round), ...all.map((c) => chunk(c, round)), finishStep(round)].reduce((m, msg) => update(m, msg).model, model)
+
+/** The story steps of one whole step of text, leaving its `CommitTurn` pending. */
+const textStep = (text: string, round = 0): ReadonlyArray<StoryStep> => [
+  message(startStep(round)),
+  ...chunks(makeTextChunks(text), round),
+  message(finishStep(round)),
+]
+
+const assistantParts = (m: ConversationModel): ReadonlyArray<ChatMessagePart> => m.messages[1]?.parts ?? []
+const assistantText = (m: ConversationModel): string =>
+  assistantParts(m)
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("")
+
+/** The part at `index` of the assistant message, which must be a tool part. */
+const toolAt = (m: ConversationModel, index: number): AnyToolUIPart<AgentTools> => {
+  const part = assistantParts(m)[index]
+  if (part === undefined || !isToolUIPart(part)) throw new Error(`no tool part at ${index}`)
+  return part
+}
+
+const streamingAt = (round: number) => TurnSchema.cases.Streaming.make({ messageId: "1", round })
 
 describe("write-ahead turn", () => {
   it("a prompt is not on screen until the transcript accepts it", () => {
@@ -34,11 +80,8 @@ describe("write-ahead turn", () => {
       expectCommands(AcceptPrompt),
       resolve(AcceptPrompt, MessageSchema.cases.SucceededAcceptPrompt.make({})),
       model((m) => {
-        assert.deepStrictEqual(m.messages, [
-          { id: 0, role: "user", text: "hello" },
-          { id: 1, role: "assistant", text: "" },
-        ])
-        assert.deepStrictEqual(m.turn, TurnSchema.cases.Streaming.make({ messageId: 1, prompt: "hello" }))
+        assert.deepStrictEqual(m.messages, [makeUserMessage("0", "hello"), makeAssistantMessage("1", [])])
+        assert.deepStrictEqual(m.turn, streamingAt(0))
         assert.strictEqual(m.nextId, 2)
       }),
     )
@@ -50,7 +93,7 @@ describe("write-ahead turn", () => {
     assert.deepStrictEqual(command?.args, { prompt: "hello" })
   })
 
-  it("a rejected prompt leaves no row and shows a notice", () => {
+  it("a rejected prompt leaves no message and shows a notice", () => {
     story(
       update,
       given(fresh()),
@@ -66,51 +109,64 @@ describe("write-ahead turn", () => {
       resolve(AcceptPrompt, MessageSchema.cases.SucceededAcceptPrompt.make({})),
     )
   })
+})
 
-  it("completion ends the turn at once and records the full text behind it", () => {
+describe("a step of text ends the turn", () => {
+  it("chunks fold into parts; finish-step commits the whole message", () => {
     story(
       update,
       given(streaming()),
-      message(MessageSchema.cases.ReceivedText.make({ messageId: 1, text: "he" })),
-      message(MessageSchema.cases.ReceivedText.make({ messageId: 1, text: "llo" })),
-      message(MessageSchema.cases.CompletedTurn.make({ messageId: 1 })),
+      message(startStep()),
+      ...chunks([
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "he" },
+      ]),
+      model((m) =>
+        assert.deepStrictEqual(assistantParts(m), [{ type: "step-start" }, { type: "text", id: "t", text: "he", state: "streaming" }]),
+      ),
+      ...chunks([
+        { type: "text-delta", id: "t", delta: "llo" },
+        { type: "text-end", id: "t" },
+      ]),
+      message(finishStep()),
       model((m) => {
-        assert.strictEqual(m.messages[1]?.text, "hello")
+        assert.deepStrictEqual(assistantParts(m), [{ type: "step-start" }, { type: "text", id: "t", text: "hello", state: "done" }])
         assert.deepStrictEqual(m.turn, TurnSchema.cases.Idle.make({}))
       }),
       expectCommands(CommitTurn),
-      resolve(CommitTurn, MessageSchema.cases.SucceededCommitTurn.make({ messageId: 1 })),
+      resolve(CommitTurn, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" })),
       model((m) => assert.deepStrictEqual(m.turn, TurnSchema.cases.Idle.make({}))),
     )
   })
 
-  it("a saved turn is a fact the model does not need", () => {
-    const idle = update(streaming(), MessageSchema.cases.CompletedTurn.make({ messageId: 1 })).model
-    unchanged(idle, MessageSchema.cases.SucceededCommitTurn.make({ messageId: 1 }))
-  })
-
-  it("the commit command carries the text and outcome", () => {
-    const withText = update(streaming(), MessageSchema.cases.ReceivedText.make({ messageId: 1, text: "partial" })).model
-    const [command] = update(withText, MessageSchema.cases.PressedEscape.make({})).commands ?? []
-    assert.strictEqual(command?.name, "CommitTurn")
-    assert.deepStrictEqual(command?.args, { messageId: 1, text: "partial", outcome: OutcomeSchema.cases.Cancelled.make({}) })
-  })
-
-  it("an agent failure records the error on the row and commits a failed outcome", () => {
-    const [command] = update(streaming(), MessageSchema.cases.FailedTurn.make({ messageId: 1, error: "offline" })).commands ?? []
-    assert.deepStrictEqual(command?.args, {
-      messageId: 1,
-      text: " [error: offline]",
-      outcome: OutcomeSchema.cases.Failed.make({ error: "offline" }),
+  it("the commit command carries the finalized parts and the outcome", () => {
+    const [command] =
+      update(step(streaming(), makeTextChunks("hello")), MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" })).commands ?? []
+    assert.isUndefined(command)
+    const mid = [startStep(), chunk({ type: "text-start", id: "t" }), chunk({ type: "text-delta", id: "t", delta: "partial" })].reduce(
+      (m, msg) => update(m, msg).model,
+      streaming(),
+    )
+    const [cancel] = update(mid, MessageSchema.cases.PressedEscape.make({})).commands ?? []
+    assert.strictEqual(cancel?.name, "CommitTurn")
+    assert.deepStrictEqual(cancel?.args, {
+      messageId: "1",
+      parts: [{ type: "step-start" }, { type: "text", id: "t", text: "partial", state: "done" }],
+      outcome: OutcomeSchema.cases.Cancelled.make({}),
     })
   })
 
-  it("a failed commit is a notice; the row stays", () => {
+  it("a saved turn is a fact the model does not need", () => {
+    const idle = step(streaming(), makeTextChunks("x"))
+    unchanged(idle, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" }))
+  })
+
+  it("a failed commit is a notice; the message stays", () => {
     story(
       update,
       given(streaming()),
-      message(MessageSchema.cases.CompletedTurn.make({ messageId: 1 })),
-      resolve(CommitTurn, MessageSchema.cases.FailedCommitTurn.make({ messageId: 1, error: "timeout" })),
+      ...textStep("x"),
+      resolve(CommitTurn, MessageSchema.cases.FailedCommitTurn.make({ messageId: "1", error: "timeout" })),
       model((m) => {
         assert.strictEqual(m.messages.length, 2)
         assert.deepStrictEqual(m.turn, TurnSchema.cases.Idle.make({}))
@@ -123,22 +179,193 @@ describe("write-ahead turn", () => {
     const next = story(
       update,
       given(streaming()),
-      message(MessageSchema.cases.CompletedTurn.make({ messageId: 1 })),
+      ...textStep("x"),
       meanwhile(MessageSchema.cases.SubmittedPrompt.make({ text: "next" })),
       resolve(AcceptPrompt, MessageSchema.cases.SucceededAcceptPrompt.make({})),
-      resolve(CommitTurn, MessageSchema.cases.FailedCommitTurn.make({ messageId: 1, error: "timeout" })),
+      resolve(CommitTurn, MessageSchema.cases.FailedCommitTurn.make({ messageId: "1", error: "timeout" })),
     ).model
-    assert.deepStrictEqual(next.turn, TurnSchema.cases.Streaming.make({ messageId: 3, prompt: "next" }))
+    assert.deepStrictEqual(next.turn, TurnSchema.cases.Streaming.make({ messageId: "3", round: 0 }))
     assert.strictEqual(next.messages.length, 4)
     assert.deepStrictEqual(next.notice, Option.some("could not save turn: timeout"))
   })
 
-  it("tokens append to the assistant row and leave every other row untouched by reference", () => {
+  it("chunks touch the assistant message and leave every other message untouched by reference", () => {
     const before = streaming()
-    const after = update(before, MessageSchema.cases.ReceivedText.make({ messageId: 1, text: "h" })).model
-    assert.strictEqual(after.messages[1]?.text, "h")
+    const after = update(before, startStep()).model
+    assert.deepStrictEqual(assistantParts(after), [{ type: "step-start" }])
     assert.strictEqual(after.messages[0], before.messages[0]!)
     assert.strictEqual(after.turn, before.turn)
+  })
+})
+
+describe("the loop", () => {
+  it("a step whose tool calls all have results continues with the next round and records the step", () => {
+    story(
+      update,
+      given(streaming()),
+      message(startStep()),
+      ...chunks(makeWeatherCallChunks("call-1", "Oslo")),
+      message(finishStep()),
+      model((m) => {
+        assert.deepStrictEqual(m.turn, streamingAt(1))
+        assert.strictEqual(assistantParts(m).length, 2)
+      }),
+      expectCommands(CommitStep),
+      resolve(CommitStep, MessageSchema.cases.SucceededCommitStep.make({ messageId: "1", round: 0 })),
+      // Round 1: the model answers with text. The turn ends.
+      message(startStep(1)),
+      ...chunks(makeTextChunks("6°C and clear in Oslo"), 1),
+      message(finishStep(1)),
+      model((m) => {
+        assert.deepStrictEqual(m.turn, TurnSchema.cases.Idle.make({}))
+        assert.strictEqual(assistantText(m), "6°C and clear in Oslo")
+        assert.deepStrictEqual(
+          assistantParts(m).map((p) => p.type),
+          ["step-start", "tool-get_weather", "step-start", "text"],
+        )
+      }),
+      expectCommands(CommitTurn),
+      resolve(CommitTurn, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" })),
+    )
+  })
+
+  it("the step commit carries the whole message so far", () => {
+    const mid = [startStep(), ...makeWeatherCallChunks("call-1", "Oslo").map((c) => chunk(c))].reduce(
+      (m, msg) => update(m, msg).model,
+      streaming(),
+    )
+    const [command] = update(mid, finishStep()).commands ?? []
+    assert.strictEqual(command?.name, "CommitStep")
+    assert.deepStrictEqual(command?.args, { messageId: "1", round: 0, parts: assistantParts(mid) })
+  })
+
+  it("a chunk for the previous round is late and ignored", () => {
+    const second = step(streaming(), makeWeatherCallChunks("call-1", "Oslo"))
+    assert.deepStrictEqual(second.turn, streamingAt(1))
+    unchanged(second, chunk({ type: "text-start", id: "late" }, 0))
+    unchanged(second, finishStep(0))
+  })
+
+  it("a tool call left without a result ends the turn rather than asking the model about it", () => {
+    const m = step(streaming(), [
+      { type: "tool-input-start", toolCallId: "call-1", toolName: "get_weather" },
+      { type: "tool-input-available", toolCallId: "call-1", toolName: "get_weather", input: { city: "Oslo" } },
+    ])
+    assert.deepStrictEqual(m.turn, TurnSchema.cases.Idle.make({}))
+  })
+
+  it("a failed tool result is still a result: the model gets to see it", () => {
+    const m = step(streaming(), [
+      { type: "tool-input-start", toolCallId: "call-1", toolName: "get_weather" },
+      { type: "tool-input-available", toolCallId: "call-1", toolName: "get_weather", input: { city: "Atlantis" } },
+      { type: "tool-output-error", toolCallId: "call-1", errorText: "unknown city" },
+    ])
+    assert.deepStrictEqual(m.turn, streamingAt(1))
+  })
+
+  it("an agent error ends the turn as failed and says so", () => {
+    story(
+      update,
+      given(streaming()),
+      message(startStep()),
+      ...chunks([
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "o" },
+      ]),
+      message(chunk({ type: "error", errorText: "offline" })),
+      model((m) => {
+        assert.deepStrictEqual(m.turn, TurnSchema.cases.Idle.make({}))
+        assert.deepStrictEqual(m.notice, Option.some("agent failed: offline"))
+        assert.deepStrictEqual(assistantParts(m), [{ type: "step-start" }, { type: "text", id: "t", text: "o", state: "done" }])
+      }),
+      expectCommands(CommitTurn),
+      resolve(CommitTurn, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" })),
+    )
+    const [command] =
+      update(streaming(), MessageSchema.cases.FailedStep.make({ messageId: "1", round: 0, error: "offline" })).commands ?? []
+    assert.deepStrictEqual(command?.args, { messageId: "1", parts: [], outcome: OutcomeSchema.cases.Failed.make({ error: "offline" }) })
+  })
+
+  it("a chunk that does not fit the message ends the turn as failed", () => {
+    const m = update(streaming(), chunk({ type: "text-delta", id: "nobody", delta: "x" })).model
+    assert.deepStrictEqual(m.turn, TurnSchema.cases.Idle.make({}))
+    assert.isTrue(Option.exists(m.notice, (n) => n.startsWith("agent failed: ")))
+  })
+})
+
+describe("approvals", () => {
+  const parked = (): ConversationModel => step(streaming(), makeEmailApprovalChunks("call-1", "approval-1"))
+
+  it("an approval request parks the turn and records the step", () => {
+    story(
+      update,
+      given(streaming()),
+      message(startStep()),
+      ...chunks(makeEmailApprovalChunks("call-1", "approval-1")),
+      message(finishStep()),
+      model((m) => assert.deepStrictEqual(m.turn, TurnSchema.cases.AwaitingApproval.make({ messageId: "1", round: 0 }))),
+      expectCommands(CommitStep),
+      resolve(CommitStep, MessageSchema.cases.SucceededCommitStep.make({ messageId: "1", round: 0 })),
+    )
+  })
+
+  it("the user's answer goes on the part, and the next round carries it to the model", () => {
+    story(
+      update,
+      given(parked()),
+      message(MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true })),
+      model((m) => {
+        assert.deepStrictEqual(m.turn, streamingAt(1))
+        const part = toolAt(m, 1)
+        assert.strictEqual(part.type, "tool-send_email")
+        assert.strictEqual(part.state, "approval-responded")
+        assert.deepStrictEqual(part.state === "approval-responded" ? part.approval : undefined, { id: "approval-1", approved: true })
+      }),
+      expectCommands(),
+      // Round 1: the pre-resolved result lands on the part from round 0, then the model answers.
+      message(startStep(1)),
+      message(chunk(makeEmailSentChunk("call-1"), 1)),
+      ...chunks(makeTextChunks("Sent."), 1),
+      message(finishStep(1)),
+      model((m) => {
+        assert.deepStrictEqual(m.turn, TurnSchema.cases.Idle.make({}))
+        const part = toolAt(m, 1)
+        assert.strictEqual(part.type, "tool-send_email")
+        assert.strictEqual(part.state, "output-available")
+      }),
+      expectCommands(CommitTurn),
+      resolve(CommitTurn, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" })),
+    )
+  })
+
+  it("a denial is an answer too; the next round ends the call as denied", () => {
+    const denied = update(parked(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: false })).model
+    assert.deepStrictEqual(denied.turn, streamingAt(1))
+    const after = step(denied, [makeDeniedChunk("call-1"), ...makeTextChunks("Not sent.")], 1)
+    assert.deepStrictEqual(after.turn, TurnSchema.cases.Idle.make({}))
+    assert.strictEqual(toolAt(after, 1).state, "output-denied")
+  })
+
+  it("two requests: the turn waits for both answers", () => {
+    const both = step(streaming(), [...makeEmailApprovalChunks("call-1", "approval-1"), ...makeEmailApprovalChunks("call-2", "approval-2")])
+    const one = update(both, MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true })).model
+    assert.deepStrictEqual(one.turn, TurnSchema.cases.AwaitingApproval.make({ messageId: "1", round: 0 }))
+    const two = update(one, MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-2", approved: false })).model
+    assert.deepStrictEqual(two.turn, streamingAt(1))
+  })
+
+  it("escape while parked cancels the turn; the request is left as it was", () => {
+    const [command] = update(parked(), MessageSchema.cases.PressedEscape.make({})).commands ?? []
+    assert.strictEqual(command?.name, "CommitTurn")
+    assert.deepStrictEqual((command?.args as { outcome: unknown } | undefined)?.outcome, OutcomeSchema.cases.Cancelled.make({}))
+  })
+
+  it("answers that fit nothing are ignored by reference", () => {
+    unchanged(parked(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-99", approved: true }))
+    unchanged(streaming(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
+    unchanged(fresh(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
+    const answered = update(parked(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true })).model
+    unchanged(answered, MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
   })
 })
 
@@ -153,37 +380,34 @@ describe("messages that do not fit the current state are ignored by reference", 
   it("escape while idle or accepting", () => {
     unchanged(fresh(), MessageSchema.cases.PressedEscape.make({}))
     unchanged(update(fresh(), MessageSchema.cases.SubmittedPrompt.make({ text: "one" })).model, MessageSchema.cases.PressedEscape.make({}))
-    unchanged(
-      update(streaming(), MessageSchema.cases.CompletedTurn.make({ messageId: 1 })).model,
-      MessageSchema.cases.PressedEscape.make({}),
-    )
+    unchanged(step(streaming(), makeTextChunks("x")), MessageSchema.cases.PressedEscape.make({}))
   })
 
-  it("text, completion and failure for a foreign or finished turn", () => {
+  it("chunks and failures for a foreign or finished step", () => {
     const live = streaming()
-    unchanged(live, MessageSchema.cases.ReceivedText.make({ messageId: 0, text: "x" }))
-    unchanged(live, MessageSchema.cases.ReceivedText.make({ messageId: 99, text: "x" }))
-    unchanged(live, MessageSchema.cases.CompletedTurn.make({ messageId: 99 }))
-    unchanged(live, MessageSchema.cases.FailedTurn.make({ messageId: 99, error: "x" }))
+    unchanged(live, chunk({ type: "start-step" }, 0, "0"))
+    unchanged(live, chunk({ type: "start-step" }, 0, "99"))
+    unchanged(live, chunk({ type: "start-step" }, 1))
+    unchanged(live, MessageSchema.cases.FailedStep.make({ messageId: "99", round: 0, error: "x" }))
 
     const ended = update(live, MessageSchema.cases.PressedEscape.make({})).model
-    unchanged(ended, MessageSchema.cases.ReceivedText.make({ messageId: 1, text: "late" }))
-    unchanged(ended, MessageSchema.cases.CompletedTurn.make({ messageId: 1 }))
-    unchanged(ended, MessageSchema.cases.FailedTurn.make({ messageId: 1, error: "late" }))
+    unchanged(ended, chunk({ type: "start-step" }))
+    unchanged(ended, finishStep())
+    unchanged(ended, MessageSchema.cases.FailedStep.make({ messageId: "1", round: 0, error: "late" }))
   })
 
-  it("a stale completion from a cancelled turn cannot end the next turn", () => {
+  it("a stale finish from a cancelled turn cannot end the next turn", () => {
     const second = story(
       update,
       given(streaming()),
       message(MessageSchema.cases.PressedEscape.make({})),
-      resolve(CommitTurn, MessageSchema.cases.SucceededCommitTurn.make({ messageId: 1 })),
+      resolve(CommitTurn, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" })),
       message(MessageSchema.cases.SubmittedPrompt.make({ text: "next" })),
       resolve(AcceptPrompt, MessageSchema.cases.SucceededAcceptPrompt.make({})),
-      model((m) => assert.deepStrictEqual(m.turn, TurnSchema.cases.Streaming.make({ messageId: 3, prompt: "next" }))),
+      model((m) => assert.deepStrictEqual(m.turn, TurnSchema.cases.Streaming.make({ messageId: "3", round: 0 }))),
     )
-    unchanged(second.model, MessageSchema.cases.CompletedTurn.make({ messageId: 1 }))
-    unchanged(second.model, MessageSchema.cases.SucceededCommitTurn.make({ messageId: 1 }))
+    unchanged(second.model, finishStep())
+    unchanged(second.model, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" }))
   })
 
   it("accept results while idle", () => {
@@ -193,21 +417,21 @@ describe("messages that do not fit the current state are ignored by reference", 
 })
 
 describe("init folds the transcript", () => {
-  it("completed turns become rows, and the model is idle", () => {
+  it("completed turns become messages, and the model is idle", () => {
     const m = init({
       events: [
         ConversationEventSchema.cases.PromptAccepted.make({ prompt: "ab" }),
-        ConversationEventSchema.cases.TurnEnded.make({ text: "AB", outcome: OutcomeSchema.cases.Completed.make({}) }),
+        makeTurnEnded("AB"),
         ConversationEventSchema.cases.PromptAccepted.make({ prompt: "c" }),
-        ConversationEventSchema.cases.TurnEnded.make({ text: "", outcome: OutcomeSchema.cases.Cancelled.make({}) }),
+        makeTurnEnded([], OutcomeSchema.cases.Cancelled.make({})),
       ],
     }).model
     assert.deepStrictEqual(m, {
       messages: [
-        { id: 0, role: "user", text: "ab" },
-        { id: 1, role: "assistant", text: "AB" },
-        { id: 2, role: "user", text: "c" },
-        { id: 3, role: "assistant", text: "" },
+        makeUserMessage("0", "ab"),
+        makeAssistantMessage("1", makeTextStep("AB")),
+        makeUserMessage("2", "c"),
+        makeAssistantMessage("3", []),
       ],
       turn: TurnSchema.cases.Idle.make({}),
       nextId: 4,
@@ -215,18 +439,46 @@ describe("init folds the transcript", () => {
     })
   })
 
-  it("a transcript that ends mid-turn is marked interrupted", () => {
-    const m = init({ events: [ConversationEventSchema.cases.PromptAccepted.make({ prompt: "ab" })] }).model
-    assert.strictEqual(m.messages[1]?.text, "[interrupted]")
-    assert.deepStrictEqual(m.turn, TurnSchema.cases.Idle.make({}))
+  it("the last snapshot wins: a step's record is replaced by the turn's", () => {
+    const weather = step(streaming(), makeWeatherCallChunks("call-1", "Oslo"))
+    const done = step(weather, makeTextChunks("clear"), 1)
+    const m = init({
+      events: [
+        ConversationEventSchema.cases.PromptAccepted.make({ prompt: "hi" }),
+        makeStepEnded(assistantParts(weather)),
+        makeTurnEnded(assistantParts(done)),
+      ],
+    }).model
+    assert.deepStrictEqual(m, done)
   })
 
-  it("a stray TurnEnded is ignored", () => {
+  it("a transcript that ends mid-step is interrupted: parts are closed, the turn is idle, and there is a notice", () => {
+    const m = init({
+      events: [
+        ConversationEventSchema.cases.PromptAccepted.make({ prompt: "ab" }),
+        makeStepEnded([{ type: "step-start" }, { type: "text", id: "t", text: "half", state: "streaming" }]),
+      ],
+    }).model
+    assert.deepStrictEqual(assistantParts(m), [{ type: "step-start" }, { type: "text", id: "t", text: "half", state: "done" }])
+    assert.deepStrictEqual(m.turn, TurnSchema.cases.Idle.make({}))
+    assert.deepStrictEqual(m.notice, Option.some("the last turn was interrupted"))
     assert.deepStrictEqual(
-      init({ events: [ConversationEventSchema.cases.TurnEnded.make({ text: "x", outcome: OutcomeSchema.cases.Completed.make({}) })] })
-        .model,
-      fresh(),
+      init({ events: [ConversationEventSchema.cases.PromptAccepted.make({ prompt: "ab" })] }).model.turn,
+      TurnSchema.cases.Idle.make({}),
     )
+  })
+
+  it("a turn parked for approval survives a restart", () => {
+    const parked = step(streaming(), makeEmailApprovalChunks("call-1", "approval-1"))
+    const m = init({
+      events: [ConversationEventSchema.cases.PromptAccepted.make({ prompt: "hi" }), makeStepEnded(assistantParts(parked))],
+    }).model
+    assert.deepStrictEqual(m, parked)
+  })
+
+  it("stray step and turn records are ignored", () => {
+    assert.deepStrictEqual(init({ events: [makeTurnEnded("x")] }).model, fresh())
+    assert.deepStrictEqual(init({ events: [makeStepEnded(makeTextStep("x"))] }).model, fresh())
   })
 })
 
@@ -234,22 +486,22 @@ it("the model is a fold over the message log", () => {
   const log = [
     MessageSchema.cases.SubmittedPrompt.make({ text: "ab" }),
     MessageSchema.cases.SucceededAcceptPrompt.make({}),
-    MessageSchema.cases.ReceivedText.make({ messageId: 1, text: "a" }),
-    MessageSchema.cases.ReceivedText.make({ messageId: 1, text: "b" }),
-    MessageSchema.cases.CompletedTurn.make({ messageId: 1 }),
-    MessageSchema.cases.SucceededCommitTurn.make({ messageId: 1 }),
+    startStep(),
+    ...makeTextChunks("ab", "t").map((c) => chunk(c)),
+    finishStep(),
+    MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" }),
     MessageSchema.cases.SubmittedPrompt.make({ text: "c" }),
     MessageSchema.cases.SucceededAcceptPrompt.make({}),
     MessageSchema.cases.PressedEscape.make({}),
-    MessageSchema.cases.SucceededCommitTurn.make({ messageId: 3 }),
+    MessageSchema.cases.SucceededCommitTurn.make({ messageId: "3" }),
   ]
   const replayed = log.reduce((model, message) => update(model, message).model, fresh())
   assert.deepStrictEqual(replayed, {
     messages: [
-      { id: 0, role: "user", text: "ab" },
-      { id: 1, role: "assistant", text: "ab" },
-      { id: 2, role: "user", text: "c" },
-      { id: 3, role: "assistant", text: "" },
+      makeUserMessage("0", "ab"),
+      makeAssistantMessage("1", [{ type: "step-start" }, { type: "text", id: "t", text: "ab", state: "done" }]),
+      makeUserMessage("2", "c"),
+      makeAssistantMessage("3", []),
     ],
     turn: TurnSchema.cases.Idle.make({}),
     nextId: 4,

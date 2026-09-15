@@ -14,6 +14,9 @@ export const canSubmit = (model: Model): boolean =>
 
 const turnRunning = (model: Model): boolean => Option.exists(model.remote, (remote) => remote.turn._tag !== "Idle")
 
+/** Is the server waiting on the user for a tool call? */
+export const awaitingApproval = (model: Model): boolean => Option.exists(model.remote, (remote) => remote.turn._tag === "AwaitingApproval")
+
 export const init = (): Return => ({
   model: { remote: Option.none(), pending: Option.none(), notice: Option.none() },
   commands: [Watch()],
@@ -33,6 +36,8 @@ export const update = (model: Model, message: Message): Return =>
       model: { ...model, notice: Option.none() },
       commands: [turnRunning(model) ? Send({ intent }) : Watch()],
     }),
+    // The server decides whether the answer fits; an answer to nothing is dropped there.
+    RespondedToolApproval: (intent) => (awaitingApproval(model) ? { model, commands: [Send({ intent })] } : { model }),
     ReceivedModel: ({ model: remote }) => ({ model: { ...model, remote: Option.some(remote), pending: Option.none() } }),
     CompletedRequest: () => ({ model: { ...model, pending: Option.none() } }),
     FailedRequest: ({ error }) => ({ model: { ...model, pending: Option.none(), notice: Option.some(error) } }),

@@ -1,4 +1,4 @@
-import type { ConversationModel, Intent } from "@q/domain/conversation/model"
+import { type ConversationModel, type Intent, IntentSchema } from "@q/domain/conversation/model"
 import type { Resume, SessionId } from "@q/domain/session/model"
 import { Context, Data, Effect, Layer, Stream } from "effect"
 
@@ -41,9 +41,11 @@ export class Transport extends Context.Service<Transport, TransportInterface>()(
       // The generated client takes one request shape per member of the payload union.
       send: (intent) =>
         stream(
-          intent._tag === "SubmittedPrompt"
-            ? client.sessions.sendIntent({ params: { id }, payload: intent })
-            : client.sessions.sendIntent({ params: { id }, payload: intent }),
+          IntentSchema.match(intent, {
+            SubmittedPrompt: (payload) => client.sessions.sendIntent({ params: { id }, payload }),
+            PressedEscape: (payload) => client.sessions.sendIntent({ params: { id }, payload }),
+            RespondedToolApproval: (payload) => client.sessions.sendIntent({ params: { id }, payload }),
+          }),
         ),
       watch: stream(client.sessions.watchSession({ params: { id } })),
     })

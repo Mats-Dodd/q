@@ -5,6 +5,7 @@
   "description": "Builders for domain values in tests. Every factory returns a valid value; tests override the fields that matter.",
   "type": "module",
   "exports": {
+    "./chat-chunk": "./src/chat-chunk.ts",
     "./conversation-event": "./src/conversation-event.ts",
     "./conversation-model": "./src/conversation-model.ts",
     "./session": "./src/session.ts"

@@ -9,11 +9,19 @@ module.exports = {
       to: { circular: true },
     },
     {
+      name: "ai-ui-is-a-library",
+      severity: "error",
+      comment: "effect-ai-ui is publishable. It imports effect and itself, nothing from the workspace.",
+      from: { path: "^packages/ai-ui/src" },
+      to: { path: "^(packages|apps)/", pathNot: "^packages/ai-ui/" },
+    },
+    {
       name: "domain-is-pure",
       severity: "error",
-      comment: "@q/domain is the shared kernel: schemas and errors only. It imports effect and itself, nothing else.",
+      comment:
+        "@q/domain is the shared kernel: schemas and errors only. It imports effect, effect-ai-ui (which is effect only) and itself.",
       from: { path: "^packages/domain/src" },
-      to: { path: "^(packages|apps)/", pathNot: "^packages/domain/" },
+      to: { path: "^(packages|apps)/", pathNot: "^packages/(domain|ai-ui)/" },
     },
     {
       name: "config-is-a-leaf",
@@ -27,7 +35,7 @@ module.exports = {
       severity: "error",
       comment: "The HTTP contract is shared by client and server. It may reach the domain and nothing else.",
       from: { path: "^packages/api-definition/src" },
-      to: { path: "^(packages|apps)/", pathNot: "^packages/(api-definition|domain)/" },
+      to: { path: "^(packages|apps)/", pathNot: "^packages/(api-definition|domain|ai-ui)/" },
     },
     {
       name: "db-does-not-import-core",

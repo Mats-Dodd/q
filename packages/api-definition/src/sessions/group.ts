@@ -27,14 +27,14 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
       success: OpenSessionResponse,
       error: [SessionNotFoundError, PersistenceError],
     }),
-    /** Dispatch one intent, then stream the Model until the turn is over. */
+    /** Dispatch one intent, then stream the Model until the conversation waits on the user. */
     HttpApiEndpoint.post("sendIntent", "/:id/send", {
       params: SessionPath,
       payload: SendIntentPayload,
       success: ConversationModelStream,
       error: [SessionNotFoundError, PersistenceError],
     }),
-    /** Stream the current Model, then every change until the turn is over. On an idle session: one Model. */
+    /** Stream the current Model, then every change until the conversation waits on the user. On an idle session: one Model. */
     HttpApiEndpoint.get("watchSession", "/:id/watch", {
       params: SessionPath,
       success: ConversationModelStream,

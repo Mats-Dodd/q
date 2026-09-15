@@ -7,6 +7,7 @@ import { ApiClient } from "@q/client/transport/api-client"
 import { openSession, Transport } from "@q/client/transport/transport-service"
 import { IntentSchema, TurnSchema } from "@q/domain/conversation/model"
 import { ResumeSchema } from "@q/domain/session/model"
+import { textOf } from "@q/factories/conversation-model"
 import * as Runtime from "@q/kit/runtime"
 import { awaiting } from "@q/test/runtime"
 import { Effect, Fiber, Layer, Option, Stream } from "effect"
@@ -42,10 +43,7 @@ layer(ServerLayerIntegration, { excludeTestServices: true })("HTTP transport", (
       assert.isAtLeast(models.length, 2)
       const last = models.at(-1)!
       assert.deepStrictEqual(last.turn, TurnSchema.cases.Idle.make({}))
-      assert.deepStrictEqual(
-        last.messages.map((m) => m.text),
-        ["ping", "ping"],
-      )
+      assert.deepStrictEqual(last.messages.map(textOf), ["ping", "ping"])
       assert.deepStrictEqual(last.notice, Option.none())
 
       assert.deepStrictEqual(yield* Stream.runCollect(transport.watch), [last])
@@ -65,10 +63,7 @@ layer(ServerLayerIntegration, { excludeTestServices: true })("HTTP transport", (
       const done = yield* awaiting(runtime, completed)
       runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "hey" }))
       yield* Fiber.join(done)
-      assert.deepStrictEqual(
-        Option.getOrThrow(runtime.model().remote).messages.map((m) => m.text),
-        ["hey", "hey"],
-      )
+      assert.deepStrictEqual(Option.getOrThrow(runtime.model().remote).messages.map(textOf), ["hey", "hey"])
     }).pipe(Effect.provide(Layer.unwrap(Effect.map(url, httpClient)))),
   )
 

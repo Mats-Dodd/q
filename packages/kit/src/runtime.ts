@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, PubSub, Queue, Scope, Stream } from "effect"
+import { Cause, Effect, Equal, Exit, PubSub, Queue, Scope, Stream } from "effect"
 
 import type { Command } from "./command"
 import type { Program } from "./program"
@@ -158,13 +158,12 @@ export const make = <Model, Msg, R, Flags>(
       // Subscribe here, synchronously, before any dispatch can publish: a Stream.fromPubSub
       // inside the forked fiber would subscribe later and miss the first model changes.
       const modelChanges = yield* PubSub.subscribe(models)
+      const project = (model: Model) => ({ deps: subscription.modelToDeps(model), model })
       yield* Effect.forkIn(
-        Stream.concat(
-          Stream.make(subscription.modelToDeps(model)),
-          Stream.fromSubscription(modelChanges).pipe(Stream.map(subscription.modelToDeps)),
-        ).pipe(
-          Stream.changes,
-          Stream.switchMap(subscription.depsToStream),
+        Stream.concat(Stream.make(project(model)), Stream.fromSubscription(modelChanges).pipe(Stream.map(project))).pipe(
+          // Only the deps decide when a stream restarts; the Model rides along as the snapshot it starts from.
+          Stream.changesWith((a, b) => Equal.equals(a.deps, b.deps)),
+          Stream.switchMap(({ deps, model }) => subscription.depsToStream(deps, model)),
           Stream.runForEach((message) => Effect.sync(() => dispatch(message))),
           Effect.catchCause(crashWith),
         ),

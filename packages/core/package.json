@@ -17,10 +17,12 @@
     "./transcript/transcript-service": "./src/transcript/transcript-service.ts"
   },
   "dependencies": {
+    "@effect/ai-anthropic": "4.0.0-rc.115",
     "@q/config": "workspace:*",
     "@q/domain": "workspace:*",
     "@q/kit": "workspace:*",
-    "effect": "4.0.0-rc.115"
+    "effect": "4.0.0-rc.115",
+    "effect-ai-ui": "workspace:*"
   },
   "devDependencies": {
     "@q/factories": "workspace:*",

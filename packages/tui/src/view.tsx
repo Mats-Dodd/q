@@ -5,10 +5,12 @@ import { type Accessor, Index, Show, createSignal } from "solid-js"
 import { type Message, MessageSchema } from "@q/client/program/message"
 import type { Model } from "@q/client/program/model"
 import { program } from "@q/client/program/program"
-import { canSubmit } from "@q/client/program/update"
+import { awaitingApproval, canSubmit } from "@q/client/program/update"
 import type { Transport } from "@q/client/transport/transport-service"
-import { type ChatMessage, type Role, TurnSchema } from "@q/domain/conversation/model"
+import type { AgentTools } from "@q/domain/agent/tools"
+import { type ChatMessage, TurnSchema } from "@q/domain/conversation/model"
 import { type SolidProgram, createProgram } from "@q/kit/solid"
+import { type AnyToolUIPart, type Role, getToolName, isToolUIPart } from "effect-ai-ui/UIMessage"
 
 // VIEW — a projection of the client Model, which mirrors one server session. Presentation state
 // (the draft) stays in Solid.
@@ -16,11 +18,13 @@ import { type SolidProgram, createProgram } from "@q/kit/solid"
 const colors = {
   user: "#7aa2f7",
   assistant: "#9ece6a",
+  system: "#565f89",
   muted: "#565f89",
+  tool: "#e0af68",
   danger: "#f7768e",
 } as const
 
-const label: Record<Role, string> = { user: "you", assistant: "q" }
+const label: Record<Role, string> = { user: "you", assistant: "q", system: "system" }
 
 /** The whole screen. The caller is the composition root and supplies the transport. A Layer that fails to build shows as a crash. */
 export const App = (props: { layer: Layer.Layer<Transport, unknown> }) => {
@@ -59,7 +63,18 @@ type Status =
   | { readonly _tag: "Connecting" }
   | { readonly _tag: "Sending" }
   | { readonly _tag: "Streaming" }
+  | { readonly _tag: "AwaitingApproval"; readonly toolName: string }
   | { readonly _tag: "Idle" }
+
+type ToolPart = AnyToolUIPart<AgentTools>
+
+const toolParts = (message: ChatMessage): ReadonlyArray<ToolPart> => message.parts.filter((part): part is ToolPart => isToolUIPart(part))
+
+/** The first tool call waiting on the user, across the conversation. There is at most one message with any. */
+const pendingApproval = (model: Model): Option.Option<ToolPart> =>
+  Option.flatMap(model.remote, (remote) =>
+    Option.fromNullishOr(remote.messages.flatMap(toolParts).find((part) => part.state === "approval-requested")),
+  )
 
 const status = (model: Model): Status => {
   if (Option.isSome(model.notice)) return { _tag: "Notice", text: model.notice.value }
@@ -69,6 +84,10 @@ const status = (model: Model): Status => {
     Idle: (): Status => ({ _tag: "Idle" }),
     Accepting: (): Status => ({ _tag: "Sending" }),
     Streaming: (): Status => ({ _tag: "Streaming" }),
+    AwaitingApproval: (): Status => ({
+      _tag: "AwaitingApproval",
+      toolName: Option.match(pendingApproval(model), { onNone: () => "tool", onSome: getToolName }),
+    }),
   })
 }
 
@@ -84,16 +103,30 @@ const Session = (props: { app: SolidProgram<Model, Message> }) => {
   const line = select(status)
   const submittable = select(canSubmit)
   const pending = select(pendingPrompt)
+  const approval = select(pendingApproval)
+  const awaiting = select(awaitingApproval)
+
+  const respond = (approved: boolean) => {
+    const part = Option.getOrUndefined(approval())
+    if (part !== undefined) dispatch(MessageSchema.cases.RespondedToolApproval.make({ toolCallId: part.toolCallId, approved }))
+  }
 
   useKeyboard((key) => {
     if (key.name === "escape") dispatch(MessageSchema.cases.PressedEscape.make({}))
+    // While the composer is out of focus these keys reach nothing else.
+    if (awaiting() && key.name === "y") respond(true)
+    if (awaiting() && key.name === "n") respond(false)
   })
 
   return (
     <box flexDirection="column" width="100%" height="100%">
       <Chat messages={messages} pending={pending} />
       <StatusLine status={line} />
-      <Composer canSubmit={submittable} onSubmit={(text) => dispatch(MessageSchema.cases.SubmittedPrompt.make({ text }))} />
+      <Composer
+        canSubmit={submittable}
+        focused={() => !awaiting()}
+        onSubmit={(text) => dispatch(MessageSchema.cases.SubmittedPrompt.make({ text }))}
+      />
     </box>
   )
 }
@@ -119,13 +152,87 @@ const PendingRow = (props: { prompt: string }) => (
   </text>
 )
 
+// SEGMENTS — a message's parts as lines. Consecutive text is one line; a tool call is its own.
+
+type Segment =
+  | { readonly _tag: "Text"; readonly text: string }
+  | { readonly _tag: "Reasoning"; readonly text: string }
+  | { readonly _tag: "Tool"; readonly part: ToolPart }
+
+const segments = (message: ChatMessage): ReadonlyArray<Segment> => {
+  const out: Array<Segment> = []
+  for (const part of message.parts) {
+    const last = out.at(-1)
+    if (part.type === "text" || part.type === "reasoning") {
+      const tag = part.type === "text" ? "Text" : "Reasoning"
+      if (last?._tag === tag) {
+        out[out.length - 1] = { _tag: tag, text: last.text + part.text }
+      } else {
+        out.push({ _tag: tag, text: part.text })
+      }
+    } else if (isToolUIPart(part)) {
+      out.push({ _tag: "Tool", part })
+    }
+  }
+  return out.length === 0 ? [{ _tag: "Text", text: "" }] : out
+}
+
+/** One line for a tool call: the call, then what became of it. */
+const describeTool = (part: ToolPart): string => {
+  const name = getToolName(part)
+  switch (part.state) {
+    case "input-streaming":
+      return `${name}(…)`
+    case "input-available":
+      return `${name}(${JSON.stringify(part.input)}) running…`
+    case "approval-requested":
+      return `${name}(${JSON.stringify(part.input)}) → approve? y / n`
+    case "approval-responded":
+      return `${name}(${JSON.stringify(part.input)}) → ${part.approval.approved ? "approved" : "denied"}`
+    case "output-available":
+      return `${name}(${JSON.stringify(part.input)}) → ${JSON.stringify(part.output)}`
+    case "output-error":
+      return `${name}(${JSON.stringify(part.input)}) → error: ${part.errorText}`
+    case "output-denied":
+      return `${name}(${JSON.stringify(part.input)}) → denied`
+  }
+}
+
 const Row = (props: { message: Accessor<ChatMessage> }) => (
-  <text selectable={false} wrapMode="word">
-    <span style={{ fg: colors[props.message().role] }}>{label[props.message().role]}</span>
-    {" › "}
-    {props.message().text}
-  </text>
+  <box flexDirection="column">
+    <Index each={segments(props.message())}>
+      {(segment, index) => (
+        <text selectable={false} wrapMode="word">
+          <Show when={index === 0} fallback={<span>{" ".repeat(label[props.message().role].length + 3)}</span>}>
+            <span style={{ fg: colors[props.message().role] }}>{label[props.message().role]}</span>
+            {" › "}
+          </Show>
+          <SegmentText segment={segment} />
+        </text>
+      )}
+    </Index>
+  </box>
 )
+
+/** Reactive: a segment changes in place as a tool call moves through its states. */
+const SegmentText = (props: { segment: Accessor<Segment> }) => {
+  const text = () => {
+    const s = props.segment()
+    return s._tag === "Tool" ? `⚙ ${describeTool(s.part)}` : s.text
+  }
+  const style = () => {
+    const s = props.segment()
+    switch (s._tag) {
+      case "Text":
+        return {}
+      case "Reasoning":
+        return { fg: colors.muted }
+      case "Tool":
+        return { fg: s.part.state === "approval-requested" ? colors.danger : colors.tool }
+    }
+  }
+  return <span style={style()}>{text()}</span>
+}
 
 const StatusLine = (props: { status: Accessor<Status> }) => {
   const text = () => {
@@ -139,6 +246,8 @@ const StatusLine = (props: { status: Accessor<Status> }) => {
         return "sending…"
       case "Streaming":
         return "streaming… Esc to cancel"
+      case "AwaitingApproval":
+        return `approve ${s.toolName}? y / n · Esc cancels`
       case "Idle":
         return "Enter sends · Esc cancels · Ctrl+C quits"
     }
@@ -151,12 +260,12 @@ const StatusLine = (props: { status: Accessor<Status> }) => {
   )
 }
 
-const Composer = (props: { canSubmit: Accessor<boolean>; onSubmit: (text: string) => void }) => {
+const Composer = (props: { canSubmit: Accessor<boolean>; focused: Accessor<boolean>; onSubmit: (text: string) => void }) => {
   const [draft, setDraft] = createSignal("")
   return (
     <box border borderStyle="rounded" borderColor={colors.muted} height={3} paddingLeft={1} paddingRight={1}>
       <input
-        focused
+        focused={props.focused()}
         width="100%"
         placeholder="Type a message…"
         value={draft()}

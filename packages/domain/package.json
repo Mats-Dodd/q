@@ -5,6 +5,7 @@
   "description": "The shared kernel: schemas, branded ids, domain models and errors. No services, no IO.",
   "type": "module",
   "exports": {
+    "./agent/tools": "./src/agent/tools.ts",
     "./conversation/model": "./src/conversation/model.ts",
     "./persistence-error": "./src/persistence-error.ts",
     "./session/errors": "./src/session/errors.ts",
@@ -12,6 +13,7 @@
     "./transcript/model": "./src/transcript/model.ts"
   },
   "dependencies": {
-    "effect": "4.0.0-rc.115"
+    "effect": "4.0.0-rc.115",
+    "effect-ai-ui": "workspace:*"
   }
 }

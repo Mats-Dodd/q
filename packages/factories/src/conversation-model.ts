@@ -1,4 +1,4 @@
-import { type ChatMessage, type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
+import { type ChatMessage, type ChatMessagePart, type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
 import { Option } from "effect"
 
 export const idleModel: ConversationModel = {
@@ -8,21 +8,52 @@ export const idleModel: ConversationModel = {
   notice: Option.none(),
 }
 
+/** The text parts of a message, joined. For assertions that care about what was said, not how it is split. */
+export const textOf = (message: ChatMessage | undefined): string =>
+  message?.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("") ?? ""
+
+/** A user message with one text part. */
+export const makeUserMessage = (id: string, text: string): ChatMessage => ({ id, role: "user", parts: [{ type: "text", text }] })
+
+/** An assistant message. The default `parts` are one finished step of text. */
+export const makeAssistantMessage = (id: string, parts: ReadonlyArray<ChatMessagePart>): ChatMessage => ({ id, role: "assistant", parts })
+
+/** The parts of one step that answered with `text`: `step-start`, then a done text part. */
+export const makeTextStep = (text: string, state: "done" | "streaming" = "done"): ReadonlyArray<ChatMessagePart> => [
+  { type: "step-start" },
+  { type: "text", id: "text-0", text, state },
+]
+
 /** A finished exchange: `prompt` was answered with `reply`. */
 export const makeAnsweredModel = (prompt: string, reply: string, overrides: Partial<ConversationModel> = {}): ConversationModel => ({
-  messages: [
-    { id: 0, role: "user", text: prompt },
-    { id: 1, role: "assistant", text: reply },
-  ] satisfies ReadonlyArray<ChatMessage>,
+  messages: [makeUserMessage("0", prompt), makeAssistantMessage("1", makeTextStep(reply))],
   turn: TurnSchema.cases.Idle.make({}),
   nextId: 2,
   notice: Option.none(),
   ...overrides,
 })
 
+/** A `send_email` call waiting on the user, as the assistant message holds it. */
+export const makeEmailApprovalPart = (toolCallId = "call-1", approvalId = "approval-1"): ChatMessagePart => ({
+  type: "tool-send_email",
+  toolCallId,
+  state: "approval-requested",
+  input: { to: "bob@example.com", subject: "hi", body: "hello" },
+  approval: { id: approvalId },
+})
+
+/** Parked: `prompt` led to a `send_email` call the user must approve. */
+export const makeAwaitingApprovalModel = (prompt: string, overrides: Partial<ConversationModel> = {}): ConversationModel => ({
+  ...makeAnsweredModel(prompt, ""),
+  messages: [makeUserMessage("0", prompt), makeAssistantMessage("1", [{ type: "step-start" }, makeEmailApprovalPart()])],
+  turn: TurnSchema.cases.AwaitingApproval.make({ messageId: "1", round: 0 }),
+  ...overrides,
+})
+
 /** Mid-turn: `prompt` is being answered, `partial` has arrived so far. */
 export const makeStreamingModel = (prompt: string, partial: string, overrides: Partial<ConversationModel> = {}): ConversationModel => ({
   ...makeAnsweredModel(prompt, partial),
-  turn: TurnSchema.cases.Streaming.make({ messageId: 1, prompt }),
+  messages: [makeUserMessage("0", prompt), makeAssistantMessage("1", makeTextStep(partial, "streaming"))],
+  turn: TurnSchema.cases.Streaming.make({ messageId: "1", round: 0 }),
   ...overrides,
 })

@@ -6,14 +6,16 @@ import type { Resume, SessionId } from "@q/domain/session/model"
 import { Effect, Stream } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 
-// HANDLERS — the `sessions` group over the core services. A turn is one response: the Model as it
-// changes, until it is idle again. The runtime is held for the request Scope, which the server hands
-// to the stream, so the session stays up as long as the client is reading.
+// HANDLERS — the `sessions` group over the core services. A response is the Model as it changes,
+// until the conversation waits on the user again: the turn is over, or a tool call needs approval.
+// The runtime is held for the request Scope, which the server hands to the stream, so the session
+// stays up as long as the client is reading.
 //
 // Services are resolved when the group is built, not per request: the in-process client
 // (`HttpApiTest.groups`) runs handlers in the caller's context, which has none of them.
 
-const untilIdle = (models: Stream.Stream<ConversationModel>) => Stream.takeUntil(models, (model) => model.turn._tag === "Idle")
+const untilWaitingOnUser = (models: Stream.Stream<ConversationModel>) =>
+  Stream.takeUntil(models, (model) => model.turn._tag === "Idle" || model.turn._tag === "AwaitingApproval")
 
 export const SessionsGroupLayer = HttpApiBuilder.group(Api, "sessions", (handlers) =>
   Effect.gen(function* sessionsGroup() {
@@ -35,13 +37,13 @@ export const SessionsGroupLayer = HttpApiBuilder.group(Api, "sessions", (handler
       const runtime = yield* runtimes.get(id)
       // Dispatch folds synchronously; `follow` then starts from the Model that fold produced.
       runtime.dispatch(intent)
-      return untilIdle(runtime.follow)
+      return untilWaitingOnUser(runtime.follow)
     })
 
     const watchSession = Effect.fn("SessionsGroupLayer.watchSession")(function* watchSession(id: SessionId) {
       yield* Effect.annotateCurrentSpan({ "session.id": id })
       const runtime = yield* runtimes.get(id)
-      return untilIdle(runtime.follow)
+      return untilWaitingOnUser(runtime.follow)
     })
 
     return handlers

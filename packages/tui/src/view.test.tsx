@@ -1,8 +1,15 @@
 import { assert, expect, it } from "@effect/vitest"
 import { testRender } from "@opentui/solid"
 import { openSession, Transport } from "@q/client/transport/transport-service"
+import { type Intent, IntentSchema } from "@q/domain/conversation/model"
 import { ResumeSchema } from "@q/domain/session/model"
-import { makeAnsweredModel, makeStreamingModel } from "@q/factories/conversation-model"
+import {
+  makeAnsweredModel,
+  makeAssistantMessage,
+  makeAwaitingApprovalModel,
+  makeStreamingModel,
+  makeTextStep,
+} from "@q/factories/conversation-model"
 import { defaultSessionsHandlers, makeApiClientTest, type SessionsHandlersTest } from "@q/test/api-mock/layer"
 import { Effect, Layer, Stream } from "effect"
 
@@ -98,5 +105,57 @@ it.live("escape cancels a streaming turn; a refused submit keeps the draft", () 
     assert.include(frame, "q ›")
     assert.notInclude(frame, "q › h")
     assert.include(frame, "draft")
+  }),
+)
+
+it.live("a tool call is a line of its own; an approval request takes y or n from the keyboard", () =>
+  Effect.gen(function* () {
+    const parked = makeAwaitingApprovalModel("email bob")
+    const sent = makeAnsweredModel("email bob", "Sent.", {
+      messages: [
+        parked.messages[0]!,
+        makeAssistantMessage("1", [
+          { type: "step-start" },
+          {
+            type: "tool-send_email",
+            toolCallId: "call-1",
+            state: "output-available",
+            input: { to: "bob@example.com", subject: "hi", body: "hello" },
+            output: { sent: true, to: "bob@example.com" },
+            approval: { id: "approval-1", approved: true },
+          },
+          ...makeTextStep("Sent."),
+        ]),
+      ],
+    })
+    const answers: Array<Intent> = []
+    const setup = yield* mount({
+      ...defaultSessionsHandlers,
+      sendIntent: (_, intent) => {
+        answers.push(intent)
+        return Effect.succeed(Stream.make(intent._tag === "SubmittedPrompt" ? parked : sent))
+      },
+    })
+    yield* waitForFrame(setup, (frame) => frame.includes("Type a message") && frame.includes("Enter sends"))
+    yield* typeText(setup, "email bob")
+    setup.mockInput.pressEnter()
+    yield* waitForFrame(setup, (frame) => frame.includes("approve send_email? y / n"))
+
+    const asked = trim(setup.captureCharFrame())
+    assert.include(asked, "you › email bob")
+    assert.include(asked, "⚙ send_email(")
+    assert.include(asked, "approve? y / n")
+    expect(asked).toMatchSnapshot()
+
+    // `y` is an answer, not a character of the draft.
+    yield* typeText(setup, "y")
+    yield* waitForFrame(setup, (frame) => frame.includes("Enter sends"))
+    const done = trim(setup.captureCharFrame())
+    assert.include(done, "q › ⚙ send_email(")
+    assert.include(done, '"sent":true')
+    assert.include(done, "Sent.")
+    assert.notInclude(done, "│ y")
+    assert.deepStrictEqual(answers.at(-1), IntentSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
+    expect(done).toMatchSnapshot()
   }),
 )

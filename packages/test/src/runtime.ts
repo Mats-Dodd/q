@@ -1,5 +1,6 @@
 import type * as Runtime from "@q/kit/runtime"
-import { Effect, Stream } from "effect"
+import { type Duration, Effect, Fiber, Stream } from "effect"
+import { TestClock } from "effect/testing"
 
 /**
  * Fork a wait for the first Message that satisfies `predicate`. Fork before the dispatch that
@@ -7,3 +8,18 @@ import { Effect, Stream } from "effect"
  */
 export const awaiting = <Model, Message>(runtime: Runtime.Runtime<Model, Message>, predicate: (message: Message) => boolean) =>
   Effect.forkChild(Stream.runHead(Stream.filter(runtime.messages, predicate)), { startImmediately: true })
+
+/**
+ * Advance the `TestClock` by `step` until `fiber` is done, then join it. For a wait on a paced
+ * stream: `TestClock.adjust` wakes the sleeps registered when it runs, and a stream that sleeps
+ * again after each element registers its next sleep only once it has run, so one large adjust
+ * does not carry it to the end. What matters is that it arrives, not on which step. Bounded by
+ * `frames`; a wait that never ends hangs on the final join and fails the test with a timeout.
+ */
+export const advancingUntil = <A, E>(fiber: Fiber.Fiber<A, E>, step: Duration.Input = "33 millis", frames = 1000): Effect.Effect<A, E> =>
+  Effect.gen(function* () {
+    for (let frame = 0; frame < frames && fiber.pollUnsafe() === undefined; frame++) {
+      yield* TestClock.adjust(step)
+    }
+    return yield* Fiber.join(fiber)
+  })

@@ -1,14 +1,17 @@
 import { assert, describe, it, layer } from "@effect/vitest"
-import { type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
+import { type ChatChunk, type ChatMessage, type ChatMessagePart, type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
 import { PersistenceError } from "@q/domain/persistence-error"
 import { ResumeSchema } from "@q/domain/session/model"
 import { type ConversationEvent, ConversationEventSchema, OutcomeSchema } from "@q/domain/transcript/model"
+import { makeEmailApprovalChunks, makeEmailSentChunk, makeTextChunks, makeWeatherCallChunks } from "@q/factories/chat-chunk"
+import { textOf } from "@q/factories/conversation-model"
 import { makeSession } from "@q/factories/session"
 import * as Runtime from "@q/kit/runtime"
 import { CryptoLayerTest, DatabaseLayerTest } from "@q/test/db/layer"
-import { awaiting } from "@q/test/runtime"
-import { Deferred, Effect, Fiber, Layer, Ref, Semaphore, Stream } from "effect"
+import { advancingUntil, awaiting } from "@q/test/runtime"
+import { Context, Deferred, Effect, Fiber, Layer, Ref, Semaphore, Stream } from "effect"
 import { TestClock } from "effect/testing"
+import { isToolUIPart } from "effect-ai-ui/UIMessage"
 
 import { AgentError, AgentService } from "../agent/agent-service"
 import { CurrentSession } from "../session/current-session"
@@ -39,7 +42,14 @@ const withNewSession = <A, E, R>(self: Effect.Effect<A, E, R>) =>
     return yield* Effect.provideService(self, CurrentSession, session)
   })
 
-const assistantText = (runtime: Runtime.Runtime<ConversationModel, Message>) => runtime.model().messages[1]?.text
+const texts = (runtime: Runtime.Runtime<ConversationModel, Message>) => runtime.model().messages.map(textOf)
+const assistantText = (runtime: Runtime.Runtime<ConversationModel, Message>) => textOf(runtime.model().messages[1])
+
+/** What the echo agent leaves behind for `text`. */
+const echoParts = (text: string): ReadonlyArray<ChatMessagePart> => [
+  { type: "step-start" },
+  { type: "text", id: "echo", text, state: "done" },
+]
 
 const loadTranscript = Effect.gen(function* () {
   const { id } = yield* CurrentSession
@@ -48,14 +58,16 @@ const loadTranscript = Effect.gen(function* () {
 }).pipe(Effect.orDie)
 
 const accepted = (m: Message) => m._tag === "SucceededAcceptPrompt"
-const received = (m: Message) => m._tag === "ReceivedText"
-const committed = (messageId: number) => (m: Message) => m._tag === "SucceededCommitTurn" && m.messageId === messageId
+const received = (m: Message) => m._tag === "ReceivedChunk" && m.chunk.type === "text-delta"
+const finished = (messageId: string) => (m: Message) =>
+  m._tag === "ReceivedChunk" && m.chunk.type === "finish-step" && m.messageId === messageId
+const committed = (messageId: string) => (m: Message) => m._tag === "SucceededCommitTurn" && m.messageId === messageId
 
 layer(Shared)("program", (it) => {
-  it.effect("a prompt streams back in batches, ends the turn, and is written ahead to the transcript", () =>
+  it.effect("a prompt streams back as it arrives, ends the turn, and is written ahead to the transcript", () =>
     Effect.gen(function* () {
       const runtime = yield* Runtime.make(program)
-      const log = yield* Effect.forkChild(Stream.runCollect(Stream.takeUntil(runtime.messages, committed(1))), {
+      const log = yield* Effect.forkChild(Stream.runCollect(Stream.takeUntil(runtime.messages, committed("1"))), {
         startImmediately: true,
       })
       const accept = yield* awaiting(runtime, accepted)
@@ -64,31 +76,52 @@ layer(Shared)("program", (it) => {
       runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "abcdef" }))
       assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Accepting.make({ prompt: "abcdef" }))
       yield* Fiber.join(accept)
-      assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Streaming.make({ messageId: 1, prompt: "abcdef" }))
-      assert.deepStrictEqual(
-        runtime.model().messages.map((m) => m.text),
-        ["abcdef", ""],
-      )
+      assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Streaming.make({ messageId: "1", round: 0 }))
+      assert.deepStrictEqual(texts(runtime), ["abcdef", ""])
 
-      yield* TestClock.adjust("33 millis")
-      yield* Fiber.join(abc)
-      assert.strictEqual(assistantText(runtime), "abc")
-      yield* TestClock.adjust("33 millis")
-      const messages = yield* Fiber.join(log)
+      // Text is on the Model before the step is over.
+      yield* advancingUntil(abc)
+      const partial = assistantText(runtime)
+      assert.isTrue(partial.length > 0 && partial.length < 6 && "abcdef".startsWith(partial))
+      const messages = yield* advancingUntil(log)
       assert.strictEqual(assistantText(runtime), "abcdef")
       assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Idle.make({}))
 
-      assert.isTrue(messages.filter(received).length <= 2)
-      assert.include(
-        messages.map((m) => m._tag),
-        "CompletedTurn",
-      )
+      // The echo agent paces one character at a time; each one was a message of its own. Nothing waited.
+      assert.strictEqual(messages.filter(received).length, 6)
+      assert.isTrue(messages.some(finished("1")))
       assert.deepStrictEqual(yield* loadTranscript, [
         ConversationEventSchema.cases.PromptAccepted.make({ prompt: "abcdef" }),
-        ConversationEventSchema.cases.TurnEnded.make({ text: "abcdef", outcome: OutcomeSchema.cases.Completed.make({}) }),
+        ConversationEventSchema.cases.TurnEnded.make({ parts: echoParts("abcdef"), outcome: OutcomeSchema.cases.Completed.make({}) }),
       ])
       const replayed = messages.reduce((model, message) => program.update(model, message).model, init({ events: [] }).model)
       assert.deepStrictEqual(replayed, runtime.model())
+    }).pipe(withNewSession),
+  )
+
+  it.effect("deltas that arrive together are one message; nothing waits for a clock", () =>
+    Effect.gen(function* () {
+      // One read from the agent carries three deltas, as one network chunk with several events would.
+      const burst: ReadonlyArray<ChatChunk> = [
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "ab" },
+        { type: "text-delta", id: "t", delta: "cd" },
+        { type: "text-delta", id: "t", delta: "ef" },
+        { type: "text-end", id: "t" },
+      ]
+      const runtime = yield* Runtime.make(program).pipe(Effect.provide(AgentService.layerScripted([burst])))
+      const log = yield* Effect.forkChild(Stream.runCollect(Stream.takeUntil(runtime.messages, committed("1"))), {
+        startImmediately: true,
+      })
+
+      runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "hi" }))
+      // No clock advance: the whole turn runs on the scheduler alone.
+      const messages = yield* Fiber.join(log)
+      assert.strictEqual(assistantText(runtime), "abcdef")
+      assert.deepStrictEqual(
+        messages.filter(received).map((m) => (m._tag === "ReceivedChunk" && m.chunk.type === "text-delta" ? m.chunk.delta : "")),
+        ["abcdef"],
+      )
     }).pipe(withNewSession),
   )
 
@@ -97,24 +130,24 @@ layer(Shared)("program", (it) => {
       const runtime = yield* Runtime.make(program)
       const accept = yield* awaiting(runtime, accepted)
       const abc = yield* awaiting(runtime, received)
-      const commit = yield* awaiting(runtime, committed(1))
+      const commit = yield* awaiting(runtime, committed("1"))
 
       runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "abcdef" }))
       yield* Fiber.join(accept)
-      yield* TestClock.adjust("33 millis")
-      yield* Fiber.join(abc)
-      assert.strictEqual(assistantText(runtime), "abc")
+      yield* advancingUntil(abc)
+      const partial = assistantText(runtime)
+      assert.isTrue(partial.length > 0 && partial.length < 6 && "abcdef".startsWith(partial))
 
       runtime.dispatch(MessageSchema.cases.PressedEscape.make({}))
       assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Idle.make({}))
       yield* Fiber.join(commit)
       yield* TestClock.adjust("1 second")
-      assert.strictEqual(assistantText(runtime), "abc")
+      assert.strictEqual(assistantText(runtime), partial)
 
       const transcript = yield* loadTranscript
       assert.deepStrictEqual(
         transcript.at(-1),
-        ConversationEventSchema.cases.TurnEnded.make({ text: "abc", outcome: OutcomeSchema.cases.Cancelled.make({}) }),
+        ConversationEventSchema.cases.TurnEnded.make({ parts: echoParts(partial), outcome: OutcomeSchema.cases.Cancelled.make({}) }),
       )
     }).pipe(withNewSession),
   )
@@ -123,19 +156,93 @@ layer(Shared)("program", (it) => {
     Effect.gen(function* () {
       const runtime = yield* Runtime.make(program)
       const accept = yield* awaiting(runtime, accepted)
-      const second = yield* awaiting(runtime, committed(3))
+      const second = yield* awaiting(runtime, committed("3"))
 
       runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "ab" }))
       yield* Fiber.join(accept)
       runtime.dispatch(MessageSchema.cases.PressedEscape.make({}))
       runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "xy" }))
-      yield* TestClock.adjust("1 second")
-      yield* Fiber.join(second)
-      assert.deepStrictEqual(
-        runtime.model().messages.map((m) => m.text),
-        ["ab", "", "xy", "xy"],
-      )
+      yield* advancingUntil(second)
+      assert.deepStrictEqual(texts(runtime), ["ab", "", "xy", "xy"])
       assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Idle.make({}))
+    }).pipe(withNewSession),
+  )
+
+  it.effect("a tool call runs the loop: the next step sees the result, and each step is recorded", () =>
+    Effect.gen(function* () {
+      const seen = yield* Ref.make<ReadonlyArray<ReadonlyArray<ChatMessage>>>([])
+      const steps: ReadonlyArray<ReadonlyArray<ChatChunk>> = [makeWeatherCallChunks("call-1", "Oslo"), makeTextChunks("6°C, clear.")]
+      const inner = yield* Layer.build(AgentService.layerScripted(steps)).pipe(Effect.map((c) => Context.get(c, AgentService)))
+      const scripted = AgentService.of({
+        step: (messages) =>
+          Stream.unwrap(
+            Effect.as(
+              Ref.update(seen, (all) => [...all, messages]),
+              inner.step(messages),
+            ),
+          ),
+      })
+      const runtime = yield* Runtime.make(program).pipe(Effect.provideService(AgentService, scripted))
+      const commit = yield* awaiting(runtime, committed("1"))
+
+      runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "weather in Oslo?" }))
+      yield* advancingUntil(commit)
+
+      assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Idle.make({}))
+      assert.strictEqual(assistantText(runtime), "6°C, clear.")
+      const parts = runtime.model().messages[1]!.parts
+      assert.deepStrictEqual(
+        parts.map((p) => p.type),
+        ["step-start", "tool-get_weather", "step-start", "text"],
+      )
+
+      // Round 1 was called with the tool result already in the message.
+      const calls = yield* Ref.get(seen)
+      assert.strictEqual(calls.length, 2)
+      assert.deepStrictEqual(calls[0]![1]!.parts, [])
+      const weather = calls[1]![1]!.parts[1]
+      assert.isTrue(weather !== undefined && isToolUIPart(weather) && weather.state === "output-available")
+
+      assert.deepStrictEqual(
+        (yield* loadTranscript).map((e) => e._tag),
+        ["PromptAccepted", "StepEnded", "TurnEnded"],
+      )
+      const restored = yield* Runtime.make(program).pipe(Effect.provideService(AgentService, scripted))
+      assert.deepStrictEqual(restored.model(), runtime.model())
+    }).pipe(withNewSession),
+  )
+
+  it.effect("an approval parks the turn across a restart; the answer resumes it", () =>
+    Effect.gen(function* () {
+      const steps: ReadonlyArray<ReadonlyArray<ChatChunk>> = [
+        makeEmailApprovalChunks("call-1", "approval-1"),
+        [makeEmailSentChunk("call-1"), ...makeTextChunks("Sent.")],
+      ]
+      // One agent for both runtimes: it plays its first step for the first, its second for the second.
+      const scripted = yield* Layer.build(AgentService.layerScripted(steps)).pipe(Effect.map((c) => Context.get(c, AgentService)))
+      const runtime = yield* Runtime.make(program).pipe(Effect.provideService(AgentService, scripted))
+      const parked = yield* awaiting(runtime, (m) => m._tag === "SucceededCommitStep")
+
+      runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "email bob" }))
+      yield* advancingUntil(parked)
+      assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.AwaitingApproval.make({ messageId: "1", round: 0 }))
+
+      // A second runtime over the same transcript is parked in the same place.
+      const restored = yield* Runtime.make(program).pipe(Effect.provideService(AgentService, scripted))
+      assert.deepStrictEqual(restored.model(), runtime.model())
+      const commit = yield* awaiting(restored, committed("1"))
+      restored.dispatch(MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
+      assert.deepStrictEqual(restored.model().turn, TurnSchema.cases.Streaming.make({ messageId: "1", round: 1 }))
+      yield* advancingUntil(commit)
+
+      assert.deepStrictEqual(restored.model().turn, TurnSchema.cases.Idle.make({}))
+      assert.strictEqual(assistantText(restored), "Sent.")
+      const email = restored.model().messages[1]!.parts[1]
+      assert.isTrue(email !== undefined && isToolUIPart(email) && email.type === "tool-send_email" && email.state === "output-available")
+      assert.deepStrictEqual(
+        (yield* loadTranscript).map((e) => e._tag),
+        ["PromptAccepted", "StepEnded", "TurnEnded"],
+      )
     }).pipe(withNewSession),
   )
 
@@ -143,21 +250,28 @@ layer(Shared)("program", (it) => {
     Effect.gen(function* () {
       const failing = Layer.succeed(
         AgentService,
-        AgentService.of({ stream: () => Stream.concat(Stream.make("o"), Stream.fail(new AgentError({ message: "offline" }))) }),
+        AgentService.of({
+          step: () =>
+            Stream.make<ReadonlyArray<ChatChunk>>(
+              { type: "start-step" },
+              { type: "text-start", id: "t" },
+              { type: "text-delta", id: "t", delta: "o" },
+            ).pipe(Stream.concat(Stream.fail(new AgentError({ message: "offline" })))),
+        }),
       )
       const runtime = yield* Runtime.make(program).pipe(Effect.provide(failing))
-      const commit = yield* awaiting(runtime, committed(1))
+      const commit = yield* awaiting(runtime, committed("1"))
 
       runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "hi" }))
-      yield* TestClock.adjust("1 second")
-      yield* Fiber.join(commit)
-      assert.strictEqual(assistantText(runtime), "o [error: offline]")
+      yield* advancingUntil(commit)
+      assert.strictEqual(assistantText(runtime), "o")
       assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Idle.make({}))
+      assert.strictEqual(runtime.model().notice._tag, "Some")
       const transcript = yield* loadTranscript
       assert.deepStrictEqual(
         transcript.at(-1),
         ConversationEventSchema.cases.TurnEnded.make({
-          text: "o [error: offline]",
+          parts: [{ type: "step-start" }, { type: "text", id: "t", text: "o", state: "done" }],
           outcome: OutcomeSchema.cases.Failed.make({ error: "offline" }),
         }),
       )
@@ -209,20 +323,18 @@ layer(Shared)("program", (it) => {
       const runtime = yield* Runtime.make(program).pipe(Effect.provide(gated), Effect.provideService(CurrentSession, makeSession()))
       const accept = yield* awaiting(runtime, accepted)
       const abc = yield* awaiting(runtime, received)
-      const ended = yield* awaiting(runtime, (m) => m._tag === "CompletedTurn" && m.messageId === 1)
-      const second = yield* awaiting(runtime, committed(3))
+      const ended = yield* awaiting(runtime, finished("1"))
+      const second = yield* awaiting(runtime, committed("3"))
 
       yield* open
       runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "abcdef" }))
       yield* Fiber.join(accept)
-      yield* TestClock.adjust("33 millis")
-      yield* Fiber.join(abc)
-      assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Streaming.make({ messageId: 1, prompt: "abcdef" }))
+      yield* advancingUntil(abc)
+      assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Streaming.make({ messageId: "1", round: 0 }))
 
       // Hold the transcript while turn one finishes: the turn ends at once, its record is in flight.
       yield* close
-      yield* TestClock.adjust("1 second")
-      yield* Fiber.join(ended)
+      yield* advancingUntil(ended)
       assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Idle.make({}))
       assert.strictEqual(assistantText(runtime), "abcdef")
       assert.strictEqual((yield* Ref.get(events)).length, 1)
@@ -234,18 +346,14 @@ layer(Shared)("program", (it) => {
       assert.strictEqual(runtime.model().messages.length, 2)
 
       yield* open
-      yield* TestClock.adjust("1 second")
-      yield* Fiber.join(second)
-      assert.deepStrictEqual(
-        runtime.model().messages.map((m) => m.text),
-        ["abcdef", "abcdef", "xy", "xy"],
-      )
+      yield* advancingUntil(second)
+      assert.deepStrictEqual(texts(runtime), ["abcdef", "abcdef", "xy", "xy"])
       assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Idle.make({}))
       assert.deepStrictEqual(yield* Ref.get(events), [
         ConversationEventSchema.cases.PromptAccepted.make({ prompt: "abcdef" }),
-        ConversationEventSchema.cases.TurnEnded.make({ text: "abcdef", outcome: OutcomeSchema.cases.Completed.make({}) }),
+        ConversationEventSchema.cases.TurnEnded.make({ parts: echoParts("abcdef"), outcome: OutcomeSchema.cases.Completed.make({}) }),
         ConversationEventSchema.cases.PromptAccepted.make({ prompt: "xy" }),
-        ConversationEventSchema.cases.TurnEnded.make({ text: "xy", outcome: OutcomeSchema.cases.Completed.make({}) }),
+        ConversationEventSchema.cases.TurnEnded.make({ parts: echoParts("xy"), outcome: OutcomeSchema.cases.Completed.make({}) }),
       ])
     }),
   )
@@ -254,45 +362,39 @@ layer(Shared)("program", (it) => {
     Effect.gen(function* () {
       const live = yield* Runtime.make(program)
       const acceptFirst = yield* awaiting(live, accepted)
-      const first = yield* awaiting(live, committed(1))
-      const second = yield* awaiting(live, committed(3))
+      const first = yield* awaiting(live, committed("1"))
+      const second = yield* awaiting(live, committed("3"))
 
       live.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "abc" }))
       yield* Fiber.join(acceptFirst)
-      yield* TestClock.adjust("1 second")
-      yield* Fiber.join(first)
+      yield* advancingUntil(first)
 
       const acceptSecond = yield* awaiting(live, accepted)
-      const def = yield* awaiting(live, (m) => received(m) && m.messageId === 3)
+      const def = yield* awaiting(live, (m) => m._tag === "ReceivedChunk" && m.chunk.type === "text-delta" && m.messageId === "3")
       live.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "defg" }))
       yield* Fiber.join(acceptSecond)
-      yield* TestClock.adjust("33 millis")
-      yield* Fiber.join(def)
+      yield* advancingUntil(def)
       live.dispatch(MessageSchema.cases.PressedEscape.make({}))
       yield* Fiber.join(second)
       assert.deepStrictEqual(live.model().turn, TurnSchema.cases.Idle.make({}))
+      const partial = textOf(live.model().messages[3])
+      assert.isTrue(partial.length > 0 && partial.length < 4 && "defg".startsWith(partial))
 
       const restored = yield* Runtime.make(program)
       assert.deepStrictEqual(restored.model(), live.model())
-      assert.deepStrictEqual(
-        restored.model().messages.map((m) => m.text),
-        ["abc", "abc", "defg", "def"],
-      )
+      assert.deepStrictEqual(texts(restored), ["abc", "abc", "defg", partial])
     }).pipe(withNewSession),
   )
 })
 
 describe("coalesce", () => {
-  it("merges adjacent text for the same row and keeps terminal messages in order", () => {
-    const batch = [
-      MessageSchema.cases.ReceivedText.make({ messageId: 1, text: "a" }),
-      MessageSchema.cases.ReceivedText.make({ messageId: 1, text: "b" }),
-      MessageSchema.cases.CompletedTurn.make({ messageId: 1 }),
-    ]
-    assert.deepStrictEqual(coalesce(batch), [
-      MessageSchema.cases.ReceivedText.make({ messageId: 1, text: "ab" }),
-      MessageSchema.cases.CompletedTurn.make({ messageId: 1 }),
-    ])
-    assert.deepStrictEqual(coalesce([]), [])
+  const delta = (delta: string, id = "t") =>
+    MessageSchema.cases.ReceivedChunk.make({ messageId: "1", round: 0, chunk: { type: "text-delta", id, delta } })
+
+  it("merges adjacent deltas of the same part and keeps everything else in order", () => {
+    const end = MessageSchema.cases.ReceivedChunk.make({ messageId: "1", round: 0, chunk: { type: "text-end", id: "t" } })
+    assert.deepStrictEqual(coalesce([delta("a"), delta("b"), end, delta("c")]), [delta("ab"), end, delta("c")])
+    assert.deepStrictEqual(coalesce([delta("a"), delta("b", "u")]), [delta("a"), delta("b", "u")])
+    assert.deepStrictEqual(coalesce([end]), [end])
   })
 })

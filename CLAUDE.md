@@ -17,15 +17,20 @@ A terminal coding agent. Effect v4 (`4.0.0-rc.*`) on Bun. One binary (`apps/q`) 
 ## Layout
 
 ```
-packages/domain          shared kernel: schemas, branded ids, models, errors. effect only.
+packages/ai-ui           effect-ai-ui, a publishable library: the AI SDK UI message protocol for effect/unstable/ai.
+                         UIMessage/UIMessageChunk schemas typed from a Toolkit, LanguageModel parts -> chunks, a pure
+                         reducer, UIMessage -> Prompt, SSE. Imports effect only; never @q/*. Exports are Effect-style
+                         (`effect-ai-ui/UIMessage`), files are kebab-case.
+packages/domain          shared kernel: schemas, branded ids, models, errors. effect and effect-ai-ui only.
+                         agent/tools.ts holds the tool definitions (Tool.make), not their handlers.
 packages/config          typed config services read from the environment. effect only.
 packages/api-definition  the HTTP contract (effect/unstable/httpapi). Depends on domain only.
 packages/db              SQLite client + migrations. Owns no table; core modules do.
 packages/core            business logic, one folder per module:
   session/               session-service, session-repository, current-session
   transcript/            transcript-service, transcript-repository
-  agent/                 agent-service
-  program/               the Elm program: message, command, update, subscription, program
+  agent/                 agent-service (one LanguageModel step as UIMessageChunks), tool-handlers
+  program/               the Elm program: message, command, update, subscription, program. `update` runs the agent loop.
   session-runtime/       live program runtimes per session
 packages/kit             Elm architecture on Effect: Runtime, Command, story DSL, Solid bridge.
 packages/client          the client program that mirrors one server session over HTTP + SSE.
@@ -36,9 +41,29 @@ apps/q                   composition root: api handlers (src/api), layers (src/l
                          Integration tests in apps/q/test/integration.
 ```
 
-Dependency direction (enforced by depcruise): `domain`, `config` ← `api-definition`, `db` ← `core` ← `apps/q`.
+Dependency direction (enforced by depcruise): `ai-ui` ← `domain`, `config` ← `api-definition`, `db` ← `core` ← `apps/q`.
+`ai-ui` imports nothing from the workspace. `core/agent` is the only place that imports `effect/unstable/ai` for a provider.
 `client` and `tui` reach the server only through `api-definition`. `test` and `factories` are never imported by runtime code.
 A `*-repository.ts` is private to its module; other modules go through the module's service. API handlers speak to services only.
+
+## The agent loop
+
+Messages are AI SDK `UIMessage`s typed by `AgentToolkit` (`@q/domain/agent/tools`); a tool part carries that tool's
+encoded input and output. `AgentService.step(messages)` is one model call as `UIMessageChunk`s, `start-step` to
+`finish-step`; it is stateless. The loop is in `core/program/update.ts`:
+
+- `Turn`: `Idle` → `Accepting` (write-ahead `PromptAccepted`) → `Streaming {messageId, round}` → … → `Idle`.
+- The `AgentTurn` subscription runs one step per `{messageId, round}`; changing the deps restarts it over the Model's messages.
+- On `finish-step`, `verdict` decides: an `approval-requested` part parks the turn in `AwaitingApproval`; a step whose client
+  tool calls all have results continues with `round + 1` (`StepEnded` is recorded); anything else ends the turn (`TurnEnded`).
+- `RespondedToolApproval` puts the answer on the part and starts the next round. Effect's `LanguageModel` runs approved
+  tools at the start of that step; their results land on the parts of the earlier step, so transcript events snapshot
+  the whole assistant message, and folding takes the last snapshot. A parked turn survives a restart.
+- Chunks reach the Model as they arrive; nothing waits on a clock. Deltas that arrive in one read are folded into one message (`coalesce`).
+- An API response streams Models until the conversation waits on the user (`Idle` or `AwaitingApproval`).
+
+`AgentConfig`: `Q_AGENT=echo|anthropic` (default: `anthropic` when `ANTHROPIC_API_KEY` is set, else `echo`),
+`Q_ANTHROPIC_MODEL`, `Q_ECHO_DELAY`. Tool handlers are stand-ins in `core/agent/tool-handlers.ts`.
 
 ## Conventions
 
@@ -63,11 +88,11 @@ OpenTUI's FFI and `bun:sqlite` need Bun; Node's vitest cannot host them. Config:
 
 - `it.effect` runs on a `TestClock` (and `TestConsole`) in its own Scope. `it.live` uses the real clock.
 - `layer(L)("name", (it) => ...)` builds `L` once for the block. `excludeTestServices: true` where the real clock matters (SQLite `created_at`, OpenTUI frames).
-- `Effect.provide` memoizes by Layer reference. To rebuild a service over a substitute inside a block that already built it, use `Layer.fresh`.
+- `Effect.provide` memoizes by Layer reference. To rebuild a service over a substitute inside a block that already built it, use `Layer.fresh`. To share one stateful service (a scripted agent) between two runtimes, `Layer.build` it once and `Effect.provideService` it to both.
 - Anything that must outlive an Effect (a server, a database) is built with `Layer.build` in the test's Scope, not with `Effect.provide`.
 - Pure `update` functions are tested with the `story` DSL from `@q/kit/story`. Schemas are tested with `it.effect.prop`.
-- `@q/test`: `DatabaseLayerTest` (in-memory SQLite + migrations), `makeApiClientTest(handlers)` (scripted server behind a real `ApiClient`), `assertFailsWithTag`.
-- `@q/factories`: `makeSession`, `makeAnsweredModel`, `makeStreamingModel`, `makePromptAccepted`, `makeTurnEnded`. Override only the fields the test is about.
+- `@q/test`: `DatabaseLayerTest` (in-memory SQLite + migrations), `makeApiClientTest(handlers)` (scripted server behind a real `ApiClient`), `assertFailsWithTag`, `awaiting`, `advancingUntil` (advance the `TestClock` step by step until a forked wait is done; one large adjust does not carry a paced stream to its end).
+- `@q/factories`: `makeSession`, `makeAnsweredModel`, `makeStreamingModel`, `makeAwaitingApprovalModel`, `makeTextStep`, `textOf`, `makePromptAccepted`, `makeStepEnded`, `makeTurnEnded`; `chat-chunk` builds the chunks of one step (`makeTextChunks`, `makeWeatherCallChunks`, `makeEmailApprovalChunks`, …) for `AgentService.layerScripted`. Override only the fields the test is about.
 - Assert with `assert` from `@effect/vitest`; `expect` only for snapshots.
 - Time is `TestClock.adjust`. Completion is a message on `Runtime.messages`: fork the wait before the dispatch, join after. Never sleep or count yields.
 

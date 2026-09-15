@@ -1,3 +1,4 @@
+import type { ChatMessagePart } from "@q/domain/conversation/model"
 import { type ConversationEvent, ConversationEventSchema, type Outcome } from "@q/domain/transcript/model"
 import * as Command from "@q/kit/command"
 import { Effect } from "effect"
@@ -21,10 +22,27 @@ export const AcceptPrompt = Command.define("AcceptPrompt", ({ prompt }: { readon
   ),
 )
 
+export const CommitStep = Command.define(
+  "CommitStep",
+  ({ messageId, round, parts }: { readonly messageId: string; readonly round: number; readonly parts: ReadonlyArray<ChatMessagePart> }) =>
+    append(ConversationEventSchema.cases.StepEnded.make({ parts })).pipe(
+      Effect.as(MessageSchema.cases.SucceededCommitStep.make({ messageId, round })),
+      Effect.catch((error) => Effect.succeed(MessageSchema.cases.FailedCommitStep.make({ messageId, round, error: error.message }))),
+    ),
+)
+
 export const CommitTurn = Command.define(
   "CommitTurn",
-  ({ messageId, text, outcome }: { readonly messageId: number; readonly text: string; readonly outcome: Outcome }) =>
-    append(ConversationEventSchema.cases.TurnEnded.make({ text, outcome })).pipe(
+  ({
+    messageId,
+    parts,
+    outcome,
+  }: {
+    readonly messageId: string
+    readonly parts: ReadonlyArray<ChatMessagePart>
+    readonly outcome: Outcome
+  }) =>
+    append(ConversationEventSchema.cases.TurnEnded.make({ parts, outcome })).pipe(
       Effect.as(MessageSchema.cases.SucceededCommitTurn.make({ messageId })),
       Effect.catch((error) => Effect.succeed(MessageSchema.cases.FailedCommitTurn.make({ messageId, error: error.message }))),
     ),
