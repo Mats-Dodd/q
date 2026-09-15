@@ -1,27 +1,27 @@
 import { assert, describe, it, layer } from "@effect/vitest"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Deferred, Effect, Fiber, Layer, Ref, Semaphore, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
+import { Sql } from "@q/db"
 import { Runtime } from "@q/kit"
 import { ConversationEvent, Outcome } from "../src/domain/event"
 import { type Model, Turn } from "../src/domain/model"
 import { Message } from "../src/message"
 import { program } from "../src/program"
 import { Agent, AgentError } from "../src/services/agent"
-import { TranscriptRepository } from "../src/services/repository"
 import { Resume, Transcript, TranscriptError } from "../src/services/transcript"
 import { coalesce } from "../src/subscription"
 import { init } from "../src/update"
 
-// Shared by the block: the echo agent and an in-memory repository. Per test: a new session, provided
-// inside the body. `it.effect` runs on a TestClock, so time is `TestClock.adjust` and completion is
-// a message on `runtime.messages`, waited for before the dispatch that causes it. The same program
-// over SQLite is covered in @q/server.
+// Shared by the block: the echo agent and the repository on a throwaway SQLite database. Per test: a
+// new session, provided inside the body. `it.effect` runs on a TestClock, so time is `TestClock.adjust`
+// and completion is a message on `runtime.messages`, waited for before the dispatch that causes it.
 //
 // Rule: wait for `SucceededAcceptPrompt` before adjusting the clock. The agent stream starts after
 // the transcript accepts the prompt (write-ahead); time advanced before that fires no sleeps.
 
-const Shared = Layer.mergeAll(Agent.Echo("10 millis"), TranscriptRepository.Memory)
+const Shared = Layer.mergeAll(Agent.Echo("10 millis"), Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" }))))
 
 const session = Transcript.Session(Resume.cases.New.make({}), "/test")
 

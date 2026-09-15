@@ -1,7 +1,7 @@
 import { Effect, Option, Schema, Stream } from "effect"
 
 import { Command, type Program } from "@q/kit"
-import { type Intent, Message as RemoteMessage, Model as Remote } from "@q/core"
+import { Intent, Model as Remote } from "@q/core"
 import { Transport } from "./transport"
 
 // CLIENT PROGRAM — a thin mirror of the server. The Model is the server's Model as last seen plus
@@ -18,14 +18,19 @@ export const Model = Schema.Struct({
 })
 export type Model = typeof Model.Type
 
-export const Message = Schema.TaggedUnion({
-  SubmittedPrompt: { text: Schema.String },
-  /** Cancel the turn when one is running; otherwise ask the server for the current Model again. */
-  PressedEscape: {},
-  ReceivedModel: { model: Remote },
-  CompletedRequest: {},
-  FailedRequest: { error: Schema.String },
-})
+// What comes back from a request. Local to the client; the server never sees these.
+const ReceivedModel = Schema.TaggedStruct("ReceivedModel", { model: Remote })
+const CompletedRequest = Schema.TaggedStruct("CompletedRequest", {})
+const FailedRequest = Schema.TaggedStruct("FailedRequest", { error: Schema.String })
+
+/**
+ * The user's intents are core's own schemas, not copies: `Message.cases.SubmittedPrompt` is the same
+ * object as `core.Message.cases.SubmittedPrompt`, so an intent is sent as it is. Escape cancels the
+ * turn when one is running; otherwise it asks the server for the current Model again.
+ */
+export const Message = Schema.Union([...Intent.members, ReceivedModel, CompletedRequest, FailedRequest]).pipe(
+  Schema.toTaggedUnion("_tag"),
+)
 export type Message = typeof Message.Type
 
 // COMMANDS
@@ -60,16 +65,16 @@ export const init = (): Program.Return<Model, Message, Transport> => ({
 
 export const update = (model: Model, message: Message): Program.Return<Model, Message, Transport> =>
   Message.match(message, {
-    SubmittedPrompt: ({ text }) => {
-      if (text.trim() === "" || !canSubmit(model)) return { model }
+    SubmittedPrompt: (intent) => {
+      if (intent.text.trim() === "" || !canSubmit(model)) return { model }
       return {
-        model: { ...model, pending: Option.some(text), notice: Option.none() },
-        commands: [Send({ intent: RemoteMessage.cases.SubmittedPrompt.make({ text }) })],
+        model: { ...model, pending: Option.some(intent.text), notice: Option.none() },
+        commands: [Send({ intent })],
       }
     },
-    PressedEscape: () => ({
+    PressedEscape: (intent) => ({
       model: { ...model, notice: Option.none() },
-      commands: [turnRunning(model) ? Send({ intent: RemoteMessage.cases.PressedEscape.make({}) }) : Watch()],
+      commands: [turnRunning(model) ? Send({ intent }) : Watch()],
     }),
     ReceivedModel: ({ model: remote }) => ({ model: { ...model, remote: Option.some(remote), pending: Option.none() } }),
     CompletedRequest: () => ({ model: { ...model, pending: Option.none() } }),

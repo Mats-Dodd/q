@@ -1,8 +1,10 @@
 import { assert, it, layer } from "@effect/vitest"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Effect, Fiber, FileSystem, Layer, Option, Path, Stream } from "effect"
 import { Etag, HttpPlatform } from "effect/unstable/http"
 
-import { Agent, Resume, TranscriptRepository, Turn } from "@q/core"
+import { Agent, Resume, Turn } from "@q/core"
+import { Sql } from "@q/db"
 import { Runtime } from "@q/kit"
 import { Sessions, SessionsHandlers } from "@q/server"
 import { Message, type Model, program } from "../src/program"
@@ -12,7 +14,7 @@ import { Client, Transport, open } from "../src/transport"
 // same encoding and routing as HTTP. The clock is real; completion is a message on the runtime.
 
 const Platform = Layer.mergeAll(Path.layer, Etag.layerWeak, HttpPlatform.layer).pipe(Layer.provideMerge(FileSystem.layerNoop({})))
-const Server = SessionsHandlers.pipe(Layer.provide(Sessions.layer()), Layer.provide(Layer.mergeAll(Agent.Echo("1 millis"), TranscriptRepository.Memory)))
+const Server = SessionsHandlers.pipe(Layer.provide(Sessions.layer()), Layer.provide(Layer.mergeAll(Agent.Echo("1 millis"), Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" }))))))
 
 const remote = (runtime: Runtime.Runtime<Model, Message>) => Option.getOrThrow(runtime.model().remote)
 

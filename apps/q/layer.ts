@@ -1,12 +1,13 @@
 import { BunHttpClient, BunHttpServer, BunServices } from "@effect/platform-bun"
-import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Client, Transport, type TransportError, open } from "@q/client"
-import { Agent, type Resume, type TranscriptError, TranscriptRepository } from "@q/core"
-import { ApiLayer, Sessions, SessionsHandlers, SqlTranscriptRepository } from "@q/server"
-import { Config, Effect, FileSystem, Layer, Option, Path, type PlatformError } from "effect"
+import { Agent, type Resume, type TranscriptError } from "@q/core"
+import { Storage } from "@q/db"
+import { ApiLayer, Sessions, SessionsHandlers } from "@q/server"
+import { Effect, Layer, Option, type PlatformError } from "effect"
 import { type HttpServerError, HttpRouter } from "effect/unstable/http"
 
-// LAYERS — the composition root. The program does not change when a Layer here does.
+// LAYERS — the composition root. The program does not change when a Layer here does. Storage is
+// `@q/db`; the agent is picked here.
 
 /** What one launch of the TUI needs to know. Parsed from the command line in `index.tsx`. */
 export interface Launch {
@@ -18,36 +19,6 @@ export interface Launch {
   /** A server to talk to instead of running one here. */
   readonly server: Option.Option<string>
 }
-
-/** Where the database lives when `--db` is not given: `$Q_DB`, else `$XDG_DATA_HOME/q/q.db`, else `~/.local/share/q/q.db`. */
-export const DbPath: Config.Config<string> = Config.String("Q_DB").pipe(
-  Config.orElse(() =>
-    Config.all([Config.option(Config.String("XDG_DATA_HOME")), Config.String("HOME")]).pipe(
-      Config.map(([xdg, home]) => `${Option.getOrElse(xdg, () => `${home}/.local/share`)}/q/q.db`),
-    ),
-  ),
-)
-
-/** The SQLite client, once the directory of the file exists. `:memory:` has none. */
-const Sqlite = (db: string) =>
-  Layer.unwrap(
-    Effect.gen(function* () {
-      if (db !== ":memory:") {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        yield* fs.makeDirectory(path.dirname(db), { recursive: true })
-      }
-      // WAL mode is on, so two processes can share the file. The busy wait is short because
-      // `bun:sqlite` blocks the event loop while it waits; a timeout surfaces as a notice, not a hang.
-      return SqliteClient.layer({ filename: db, busyTimeout: "1 second" })
-    }),
-  )
-
-/** The repository over `bun:sqlite`, at `db`. */
-export const Storage = (
-  db: string,
-): Layer.Layer<TranscriptRepository, TranscriptError | PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
-  SqlTranscriptRepository.pipe(Layer.provide(Sqlite(db)))
 
 /** The server's handlers over storage at `db` and the echo agent. Swap the agent here. */
 export const Handlers = (db: string) =>

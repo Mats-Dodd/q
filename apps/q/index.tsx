@@ -1,11 +1,12 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { render } from "@opentui/solid"
 import { Resume, SessionId, TranscriptRepository } from "@q/core"
+import { DbPath, Storage } from "@q/db"
 import { App } from "@q/tui"
 import { Console, DateTime, Effect, Layer, Option } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 
-import { DbPath, type Launch, Serve, Storage, TransportLayer } from "./layer"
+import { type Launch, Serve, TransportLayer } from "./layer"
 
 // ENTRY — parse the command line, pick the session, render. The only place that knows about flags.
 

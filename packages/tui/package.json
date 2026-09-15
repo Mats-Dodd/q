@@ -17,6 +17,8 @@
     "solid-js": "1.9.12"
   },
   "devDependencies": {
+    "@effect/sql-sqlite-bun": "4.0.0-rc.115",
+    "@q/db": "workspace:*",
     "@q/server": "workspace:*"
   }
 }

@@ -1,10 +1,12 @@
 import { assert, it, layer } from "@effect/vitest"
 import { BunHttpClient, BunHttpServer } from "@effect/platform-bun"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Effect, Fiber, Layer, Option, Stream } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import * as NetAddress from "effect/unstable/net/NetAddress"
 
-import { Agent, Message as Intent, Resume, TranscriptRepository, Turn } from "@q/core"
+import { Agent, Message as Intent, Resume, Turn } from "@q/core"
+import { Sql } from "@q/db"
 import { Runtime } from "@q/kit"
 import { ApiLayer, Sessions, SessionsHandlers } from "@q/server"
 import { Message, type Model, program } from "../src/program"
@@ -16,7 +18,7 @@ import { Client, Transport, open } from "../src/transport"
 const Server = HttpRouter.serve(ApiLayer, { disableLogger: true }).pipe(
   Layer.provide(SessionsHandlers),
   Layer.provide(Sessions.layer()),
-  Layer.provide(Layer.mergeAll(Agent.Echo("1 millis"), TranscriptRepository.Memory)),
+  Layer.provide(Layer.mergeAll(Agent.Echo("1 millis"), Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" }))))),
   Layer.provideMerge(BunHttpServer.layerTest),
 )
 

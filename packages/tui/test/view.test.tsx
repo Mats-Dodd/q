@@ -1,10 +1,12 @@
 import { assert, expect, layer } from "@effect/vitest"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { testRender } from "@opentui/solid"
 import { Context, type Duration, Effect, FileSystem, Layer, Path } from "effect"
 import { Etag, HttpPlatform } from "effect/unstable/http"
 
 import { Client, Transport, open } from "@q/client"
 import { Agent, Resume, TranscriptRepository } from "@q/core"
+import { Sql } from "@q/db"
 import { Sessions, SessionsHandlers } from "@q/server"
 
 import { App } from "../src/view"
@@ -15,18 +17,21 @@ import { App } from "../src/view"
 
 const Platform = Layer.mergeAll(Path.layer, Etag.layerWeak, HttpPlatform.layer).pipe(Layer.provideMerge(FileSystem.layerNoop({})))
 
+/** The real repository on a throwaway SQLite database. */
+const Sqlite = Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
+
 const trim = (frame: string) => frame.split("\n").map((line) => line.trimEnd()).join("\n")
 
 /** A repository that never finishes an append: the prompt stays pending. */
 const stuck = Layer.effect(TranscriptRepository)(
   Effect.gen(function* () {
-    const memory = Context.get(yield* Layer.build(TranscriptRepository.Memory), TranscriptRepository)
-    return { ...memory, append: () => Effect.never }
+    const sqlite = Context.get(yield* Layer.build(Sqlite), TranscriptRepository)
+    return { ...sqlite, append: () => Effect.never }
   }),
 )
 
 /** Mount `App` over a fresh server with an echo agent of `delay`, on a new session. */
-const mount = (delay: Duration.Input | null, repository: Layer.Layer<TranscriptRepository> = TranscriptRepository.Memory) =>
+const mount = (delay: Duration.Input | null, repository: Layer.Layer<TranscriptRepository, unknown> = Sqlite) =>
   Effect.gen(function* () {
     const server = yield* Layer.build(
       SessionsHandlers.pipe(Layer.provide(Sessions.layer()), Layer.provide(Layer.mergeAll(Agent.Echo(delay), repository))),

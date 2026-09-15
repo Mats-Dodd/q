@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The q server: sessions as live runtimes, the HTTP API over them, and SQLite storage. No screen.",
+  "description": "The q server: sessions as live runtimes and the HTTP API over them. Storage is @q/db. No screen.",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -14,6 +14,7 @@
   },
   "devDependencies": {
     "@effect/platform-bun": "4.0.0-rc.115",
-    "@effect/sql-sqlite-bun": "4.0.0-rc.115"
+    "@effect/sql-sqlite-bun": "4.0.0-rc.115",
+    "@q/db": "workspace:*"
   }
 }

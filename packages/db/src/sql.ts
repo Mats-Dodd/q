@@ -3,8 +3,8 @@ import { Migrator, SqlClient, SqlSchema } from "effect/unstable/sql"
 
 import { ConversationEvent, type Session, SessionId, TranscriptError, TranscriptRepository } from "@q/core"
 
-// STORAGE — the `TranscriptRepository` over SQL. The SQL lives here and nowhere else. Parse, do not
-// validate: rows become domain values at this boundary or they are a `TranscriptError`.
+// SQL — the `TranscriptRepository` over a `SqlClient`. The SQL lives here and nowhere else. Parse,
+// do not validate: rows become domain values at this boundary or they are a `TranscriptError`.
 
 // ROWS
 
@@ -44,9 +44,9 @@ const orTranscriptError = <A, E, R>(self: Effect.Effect<A, E, R>) =>
 
 /**
  * The repository over any `SqlClient`. Runs its migrations when the Layer is built. The SQL is
- * SQLite's dialect; the host binds the client.
+ * SQLite's dialect; `Sqlite` in this package binds the client.
  */
-export const SqlTranscriptRepository: Layer.Layer<TranscriptRepository, TranscriptError, SqlClient.SqlClient> = Layer.effect(
+export const Sql: Layer.Layer<TranscriptRepository, TranscriptError, SqlClient.SqlClient> = Layer.effect(
   TranscriptRepository,
 )(
   Effect.gen(function* () {

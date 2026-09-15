@@ -1,26 +1,30 @@
 import { assert, it, layer } from "@effect/vitest"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Stream } from "effect"
 import { Etag, HttpPlatform } from "effect/unstable/http"
 import { HttpApiTest } from "effect/unstable/httpapi"
 
-import { Agent, Api, Message, Resume, SessionId, TranscriptRepository, Turn } from "@q/core"
+import { Agent, Api, Message, Resume, SessionId, Turn } from "@q/core"
+import { Sql } from "@q/db"
 import { SessionsHandlers } from "../src/api"
 import { Sessions } from "../src/sessions"
 
 // The API through an in-memory client: the same encoding, routing and decoding as over a socket,
-// without one. The clock is real: the echo agent's delays are tiny and completion is the end of
-// the SSE stream, never a sleep.
+// without one. Storage is real SQLite on a throwaway database. The clock is real: the echo agent's
+// delays are tiny and completion is the end of the SSE stream, never a sleep.
 
 const Services = Layer.mergeAll(Path.layer, Etag.layerWeak, HttpPlatform.layer).pipe(Layer.provideMerge(FileSystem.layerNoop({})))
 
-/** A client over a fresh server: its own sessions, its own storage, the given agent. Lives in the test's Scope. */
+/** A client over a fresh server: its own sessions, its own database, the given agent. Lives in the test's Scope. */
 const client = (agent: Layer.Layer<Agent>) =>
   Effect.gen(function* () {
     const server = yield* Layer.build(
-      SessionsHandlers.pipe(Layer.provide(Sessions.layer()), Layer.provide(Layer.mergeAll(agent, TranscriptRepository.Memory))),
+      SessionsHandlers.pipe(Layer.provide(Sessions.layer()), Layer.provide(Layer.mergeAll(agent, Sqlite))),
     )
     return yield* HttpApiTest.groups(Api, ["sessions"]).pipe(Effect.provide(server))
   })
+
+const Sqlite = Sql.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
 
 const texts = (model: { readonly messages: ReadonlyArray<{ readonly text: string }> }) => model.messages.map((m) => m.text)
 

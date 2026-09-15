@@ -6,8 +6,8 @@ export { ConversationEvent, Outcome } from "./domain/event"
 export { ChatMessage, Model, Role, Turn } from "./domain/model"
 export { Session, SessionId } from "./domain/session"
 
-// Services: tags with their pure Layers as statics (`Agent.Echo`, `TranscriptRepository.Memory`,
-// `Transcript.Session`). Durable storage is bound to a `SqlClient` in @q/server.
+// Services: tags, with pure Layers as statics where there are any (`Agent.Echo`, `Transcript.Session`).
+// Every `TranscriptRepository` Layer is in @q/db.
 export { Agent, AgentError } from "./services/agent"
 export { TranscriptRepository } from "./services/repository"
 export { Resume, Transcript, TranscriptError } from "./services/transcript"

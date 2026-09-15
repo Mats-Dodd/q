@@ -19,10 +19,10 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/platform-bun": "4.0.0-rc.115",
-        "@effect/sql-sqlite-bun": "4.0.0-rc.115",
         "@opentui/solid": "0.5.10",
         "@q/client": "workspace:*",
         "@q/core": "workspace:*",
+        "@q/db": "workspace:*",
         "@q/server": "workspace:*",
         "@q/tui": "workspace:*",
         "effect": "4.0.0-rc.115",
@@ -38,6 +38,8 @@
       },
       "devDependencies": {
         "@effect/platform-bun": "4.0.0-rc.115",
+        "@effect/sql-sqlite-bun": "4.0.0-rc.115",
+        "@q/db": "workspace:*",
         "@q/server": "workspace:*",
       },
     },
@@ -47,6 +49,22 @@
       "dependencies": {
         "@q/kit": "workspace:*",
         "effect": "4.0.0-rc.115",
+      },
+      "devDependencies": {
+        "@effect/sql-sqlite-bun": "4.0.0-rc.115",
+        "@q/db": "workspace:*",
+      },
+    },
+    "packages/db": {
+      "name": "@q/db",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/sql-sqlite-bun": "4.0.0-rc.115",
+        "@q/core": "workspace:*",
+        "effect": "4.0.0-rc.115",
+      },
+      "devDependencies": {
+        "@effect/platform-bun": "4.0.0-rc.115",
       },
     },
     "packages/kit": {
@@ -73,6 +91,7 @@
       "devDependencies": {
         "@effect/platform-bun": "4.0.0-rc.115",
         "@effect/sql-sqlite-bun": "4.0.0-rc.115",
+        "@q/db": "workspace:*",
       },
     },
     "packages/tui": {
@@ -88,6 +107,8 @@
         "solid-js": "1.9.12",
       },
       "devDependencies": {
+        "@effect/sql-sqlite-bun": "4.0.0-rc.115",
+        "@q/db": "workspace:*",
         "@q/server": "workspace:*",
       },
     },
@@ -195,6 +216,8 @@
     "@q/client": ["@q/client@workspace:packages/client"],
 
     "@q/core": ["@q/core@workspace:packages/core"],
+
+    "@q/db": ["@q/db@workspace:packages/db"],
 
     "@q/kit": ["@q/kit@workspace:packages/kit"],
 
