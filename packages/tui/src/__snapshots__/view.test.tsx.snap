@@ -1,0 +1,14 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`typing a prompt and pressing Enter echoes it back 1`] = `
+" you › hello
+ q › hello
+
+
+
+ Enter sends · Esc cancels · Ctrl+C
+╭──────────────────────────────────────╮
+│ Type a message…                      │
+╰──────────────────────────────────────╯
+"
+`;

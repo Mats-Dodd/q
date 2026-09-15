@@ -18,10 +18,7 @@ export type Definition<Name extends string, A extends Args, Msg, R> = {
   readonly name: Name
 } & (keyof A extends never ? () => Command<Msg, R> : (args: A) => Command<Msg, R>)
 
-const named = <Name extends string, A extends Args, Msg, R>(
-  name: Name,
-  make: (args?: A) => Command<Msg, R>,
-): Definition<Name, A, Msg, R> =>
+const named = <Name extends string, A extends Args, Msg, R>(name: Name, make: (args?: A) => Command<Msg, R>): Definition<Name, A, Msg, R> =>
   Object.defineProperty(make, "name", { value: name }) as unknown as Definition<Name, A, Msg, R>
 
 /**

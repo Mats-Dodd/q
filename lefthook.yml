@@ -1,0 +1,16 @@
+# Git hooks. `bun install` wires them in through the `prepare` script.
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: "*.{ts,tsx,json}"
+      run: bunx oxfmt {staged_files}
+      stage_fixed: true
+    lint:
+      glob: "*.{ts,tsx}"
+      run: bunx oxlint {staged_files}
+
+pre-push:
+  commands:
+    verify:
+      run: bun run typecheck && bun run check && bun run knip && bun run depcruise && bun run test

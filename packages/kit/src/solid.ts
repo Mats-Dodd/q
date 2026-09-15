@@ -60,7 +60,7 @@ export const createProgram = <Model, Msg, R, E, Flags>(
     const runtime = exit.value
     const [model, set] = createSignal<Model>(runtime.model())
     setModel = (next) => set(() => next)
-    const select = <Value,>(project: (model: Model) => Value) => createMemo(() => project(model()))
+    const select = <Value>(project: (model: Model) => Value) => createMemo(() => project(model()))
     return { model, select, dispatch: runtime.dispatch, runtime }
   })
 

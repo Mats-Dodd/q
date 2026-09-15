@@ -2,17 +2,28 @@
   "name": "@q/core",
   "version": "0.0.0",
   "private": true,
+  "description": "Business logic as a modular monolith: session, transcript, agent, program, session-runtime. Services are the public interface; repositories are private.",
   "type": "module",
-  "description": "The q agent program: model, messages, transcript events, service tags, update and subscriptions, and the HTTP API contract. Headless and pure.",
   "exports": {
-    ".": "./src/index.ts"
+    "./agent/agent-service": "./src/agent/agent-service.ts",
+    "./program/command": "./src/program/command.ts",
+    "./program/message": "./src/program/message.ts",
+    "./program/program": "./src/program/program.ts",
+    "./program/subscription": "./src/program/subscription.ts",
+    "./program/update": "./src/program/update.ts",
+    "./session/current-session": "./src/session/current-session.ts",
+    "./session/session-service": "./src/session/session-service.ts",
+    "./session-runtime/session-runtime-service": "./src/session-runtime/session-runtime-service.ts",
+    "./transcript/transcript-service": "./src/transcript/transcript-service.ts"
   },
   "dependencies": {
+    "@q/config": "workspace:*",
+    "@q/domain": "workspace:*",
     "@q/kit": "workspace:*",
     "effect": "4.0.0-rc.115"
   },
   "devDependencies": {
-    "@effect/sql-sqlite-bun": "4.0.0-rc.115",
-    "@q/db": "workspace:*"
+    "@q/factories": "workspace:*",
+    "@q/test": "workspace:*"
   }
 }

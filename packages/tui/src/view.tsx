@@ -2,8 +2,12 @@ import { useKeyboard } from "@opentui/solid"
 import { Cause, type Layer, Option } from "effect"
 import { type Accessor, Index, Show, createSignal } from "solid-js"
 
-import { Message, type Model, type Transport, canSubmit, program } from "@q/client"
-import { type ChatMessage, type Role, Turn } from "@q/core"
+import { type Message, MessageSchema } from "@q/client/program/message"
+import type { Model } from "@q/client/program/model"
+import { program } from "@q/client/program/program"
+import { canSubmit } from "@q/client/program/update"
+import type { Transport } from "@q/client/transport/transport-service"
+import { type ChatMessage, type Role, TurnSchema } from "@q/domain/conversation/model"
 import { type SolidProgram, createProgram } from "@q/kit/solid"
 
 // VIEW — a projection of the client Model, which mirrors one server session. Presentation state
@@ -61,7 +65,7 @@ const status = (model: Model): Status => {
   if (Option.isSome(model.notice)) return { _tag: "Notice", text: model.notice.value }
   if (Option.isNone(model.remote)) return { _tag: "Connecting" }
   if (Option.isSome(model.pending)) return { _tag: "Sending" }
-  return Turn.match(model.remote.value.turn, {
+  return TurnSchema.match(model.remote.value.turn, {
     Idle: (): Status => ({ _tag: "Idle" }),
     Accepting: (): Status => ({ _tag: "Sending" }),
     Streaming: (): Status => ({ _tag: "Streaming" }),
@@ -82,14 +86,14 @@ const Session = (props: { app: SolidProgram<Model, Message> }) => {
   const pending = select(pendingPrompt)
 
   useKeyboard((key) => {
-    if (key.name === "escape") dispatch(Message.cases.PressedEscape.make({}))
+    if (key.name === "escape") dispatch(MessageSchema.cases.PressedEscape.make({}))
   })
 
   return (
     <box flexDirection="column" width="100%" height="100%">
       <Chat messages={messages} pending={pending} />
       <StatusLine status={line} />
-      <Composer canSubmit={submittable} onSubmit={(text) => dispatch(Message.cases.SubmittedPrompt.make({ text }))} />
+      <Composer canSubmit={submittable} onSubmit={(text) => dispatch(MessageSchema.cases.SubmittedPrompt.make({ text }))} />
     </box>
   )
 }

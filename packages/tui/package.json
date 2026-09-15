@@ -2,23 +2,21 @@
   "name": "@q/tui",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "description": "The terminal view over @q/client, on OpenTUI with Solid.",
+  "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    "./view": "./src/view.tsx"
   },
   "dependencies": {
     "@opentui/core": "0.5.10",
     "@opentui/solid": "0.5.10",
     "@q/client": "workspace:*",
-    "@q/core": "workspace:*",
+    "@q/domain": "workspace:*",
     "@q/kit": "workspace:*",
     "effect": "4.0.0-rc.115",
     "solid-js": "1.9.12"
   },
   "devDependencies": {
-    "@effect/sql-sqlite-bun": "4.0.0-rc.115",
-    "@q/db": "workspace:*",
-    "@q/server": "workspace:*"
+    "@q/test": "workspace:*"
   }
 }

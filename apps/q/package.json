@@ -2,20 +2,27 @@
   "name": "q",
   "version": "0.0.0",
   "private": true,
+  "description": "The q binary. Composition root: the API handlers, the layers that run or reach the server, and the CLI.",
   "type": "module",
-  "description": "The q binary. Composition root: runs or reaches the server, and renders the TUI.",
   "scripts": {
-    "start": "bun index.tsx",
+    "start": "bun src/cli.ts",
     "build": "bun build.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "4.0.0-rc.115",
     "@opentui/solid": "0.5.10",
+    "@q/api-definition": "workspace:*",
     "@q/client": "workspace:*",
+    "@q/config": "workspace:*",
     "@q/core": "workspace:*",
     "@q/db": "workspace:*",
-    "@q/server": "workspace:*",
+    "@q/domain": "workspace:*",
     "@q/tui": "workspace:*",
     "effect": "4.0.0-rc.115"
+  },
+  "devDependencies": {
+    "@q/factories": "workspace:*",
+    "@q/kit": "workspace:*",
+    "@q/test": "workspace:*"
   }
 }

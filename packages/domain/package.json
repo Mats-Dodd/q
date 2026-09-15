@@ -1,0 +1,17 @@
+{
+  "name": "@q/domain",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The shared kernel: schemas, branded ids, domain models and errors. No services, no IO.",
+  "type": "module",
+  "exports": {
+    "./conversation/model": "./src/conversation/model.ts",
+    "./persistence-error": "./src/persistence-error.ts",
+    "./session/errors": "./src/session/errors.ts",
+    "./session/model": "./src/session/model.ts",
+    "./transcript/model": "./src/transcript/model.ts"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.115"
+  }
+}

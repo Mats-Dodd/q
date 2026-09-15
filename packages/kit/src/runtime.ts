@@ -177,9 +177,7 @@ export const make = <Model, Msg, R, Flags>(
 
     // Subscribe first, read second: a change between the two is delivered twice, never dropped.
     const follow = Stream.unwrap(
-      Effect.map(PubSub.subscribe(models), (subscription) =>
-        Stream.concat(Stream.make(model), Stream.fromSubscription(subscription)),
-      ),
+      Effect.map(PubSub.subscribe(models), (subscription) => Stream.concat(Stream.make(model), Stream.fromSubscription(subscription))),
     )
 
     return {

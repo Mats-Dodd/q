@@ -2,20 +2,25 @@
   "name": "@q/client",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "description": "A thin client program that mirrors one server session over HTTP and SSE, and the transports that reach it.",
+  "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    "./program/command": "./src/program/command.ts",
+    "./program/message": "./src/program/message.ts",
+    "./program/model": "./src/program/model.ts",
+    "./program/program": "./src/program/program.ts",
+    "./program/update": "./src/program/update.ts",
+    "./transport/api-client": "./src/transport/api-client.ts",
+    "./transport/transport-service": "./src/transport/transport-service.ts"
   },
   "dependencies": {
-    "@q/core": "workspace:*",
+    "@q/api-definition": "workspace:*",
+    "@q/domain": "workspace:*",
     "@q/kit": "workspace:*",
     "effect": "4.0.0-rc.115"
   },
   "devDependencies": {
-    "@effect/platform-bun": "4.0.0-rc.115",
-    "@effect/sql-sqlite-bun": "4.0.0-rc.115",
-    "@q/db": "workspace:*",
-    "@q/server": "workspace:*"
+    "@q/factories": "workspace:*",
+    "@q/test": "workspace:*"
   }
 }

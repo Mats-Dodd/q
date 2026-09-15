@@ -1,0 +1,16 @@
+{
+  "name": "@q/api-definition",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The HTTP API contract between a client and the server. Shared by both; depends on the domain only.",
+  "type": "module",
+  "exports": {
+    "./api": "./src/api.ts",
+    "./sessions/group": "./src/sessions/group.ts",
+    "./sessions/schemas": "./src/sessions/schemas.ts"
+  },
+  "dependencies": {
+    "@q/domain": "workspace:*",
+    "effect": "4.0.0-rc.115"
+  }
+}

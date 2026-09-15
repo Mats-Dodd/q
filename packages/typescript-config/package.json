@@ -1,0 +1,6 @@
+{
+  "name": "@q/typescript-config",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The one tsconfig every package extends."
+}

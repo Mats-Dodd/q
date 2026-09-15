@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
+  "plugins": ["typescript", "import", "unicorn"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "rules": {
+    "no-unused-vars": "off",
+    "no-underscore-dangle": "off",
+    "no-shadow": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "import/no-cycle": "error",
+    "import/no-default-export": "error",
+    "unicorn/filename-case": ["error", { "case": "kebabCase" }]
+  },
+  "overrides": [
+    {
+      "files": ["vitest.config.ts"],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["**/node_modules", "**/dist", "**/__snapshots__"]
+}

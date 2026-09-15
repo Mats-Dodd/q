@@ -1,0 +1,16 @@
+{
+  "name": "@q/factories",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Builders for domain values in tests. Every factory returns a valid value; tests override the fields that matter.",
+  "type": "module",
+  "exports": {
+    "./conversation-event": "./src/conversation-event.ts",
+    "./conversation-model": "./src/conversation-model.ts",
+    "./session": "./src/session.ts"
+  },
+  "dependencies": {
+    "@q/domain": "workspace:*",
+    "effect": "4.0.0-rc.115"
+  }
+}

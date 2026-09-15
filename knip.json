@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreDependencies": ["@opentui/core", "@swc/core"],
+  "rules": {
+    "optionalPeerDependencies": "off"
+  },
+  "workspaces": {
+    ".": {
+      "project": ["*.ts"]
+    },
+    "apps/q": {
+      "entry": ["test/**/*.test.ts"],
+      "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]
+    },
+    "packages/*": {
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/typescript-config": {
+      "project": [],
+      "ignoreDependencies": ["@effect/language-service", "@opentui/solid"]
+    }
+  }
+}

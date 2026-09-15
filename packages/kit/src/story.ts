@@ -29,16 +29,20 @@ interface Named {
   readonly name: string
 }
 
-const names = (commands: ReadonlyArray<Named>) => commands.map((c) => c.name).sort().join(", ") || "(none)"
+const names = (commands: ReadonlyArray<Named>) =>
+  commands
+    .map((c) => c.name)
+    .toSorted()
+    .join(", ") || "(none)"
 
 export const story = <Model, Msg, R>(
   update: Update<Model, Msg, R>,
   ...steps: ReadonlyArray<Step<Model, Msg, R>>
 ): Simulation<Model, Msg, R> => {
-  const final = steps.reduce<Simulation<Model, Msg, R>>(
-    (simulation, current) => current.run(simulation, update),
-    { model: undefined as never, commands: [] },
-  )
+  const final = steps.reduce<Simulation<Model, Msg, R>>((simulation, current) => current.run(simulation, update), {
+    model: undefined as never,
+    commands: [],
+  })
   if (final.commands.length > 0) {
     throw new Error(`Story ended with unresolved commands: ${names(final.commands)}`)
   }

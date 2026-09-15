@@ -1,27 +1,41 @@
 {
   "name": "q-workspace",
   "private": true,
-  "type": "module",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
+  "type": "module",
   "scripts": {
-    "start": "bun apps/q/index.tsx",
+    "start": "bun apps/q/src/cli.ts",
     "build": "bun apps/q/build.ts",
     "test": "bun --bun vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "effect-tsgo diagnostics --project tsconfig.json",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "knip": "knip",
+    "depcruise": "depcruise packages apps --config .dependency-cruiser.cjs",
+    "verify": "bun run typecheck && bun run check && bun run lint && bun run format:check && bun run knip && bun run depcruise && bun run test",
+    "prepare": "lefthook install && effect-tsgo patch --typescript --oxlint"
   },
   "devDependencies": {
+    "@effect/tsgo": "0.45.0",
     "@effect/vitest": "4.0.0-rc.115",
+    "@swc/core": "^1.16.2",
     "@types/bun": "latest",
+    "dependency-cruiser": "^18.3.1",
+    "knip": "^6.35.1",
+    "lefthook": "^2.0.0",
+    "oxfmt": "^0.68.0",
+    "oxlint": "1.82.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2",
     "vite-plugin-solid": "^2.11.14",
     "vitest": "5.0.0"
   },
   "overrides": {
     "@effect/platform-node-shared": "4.0.0-rc.115"
-  },
-  "peerDependencies": {
-    "typescript": "^7"
   }
 }

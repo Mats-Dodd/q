@@ -2,14 +2,15 @@
   "name": "@q/db",
   "version": "0.0.0",
   "private": true,
+  "description": "The SQLite client and the migrations. Owns no table: modules in @q/core do.",
   "type": "module",
-  "description": "Storage for q: the TranscriptRepository over SQLite, and in memory for tests. The only package that knows SQL.",
   "exports": {
-    ".": "./src/index.ts"
+    "./database": "./src/database.ts",
+    "./migrations": "./src/migrations.ts"
   },
   "dependencies": {
     "@effect/sql-sqlite-bun": "4.0.0-rc.115",
-    "@q/core": "workspace:*",
+    "@q/config": "workspace:*",
     "effect": "4.0.0-rc.115"
   },
   "devDependencies": {

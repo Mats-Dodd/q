@@ -1,0 +1,25 @@
+{
+  "name": "@q/test",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Test infrastructure: the in-memory database, a scripted API server, runtime helpers and exit assertions. Never imported by runtime code.",
+  "type": "module",
+  "exports": {
+    "./api-mock/layer": "./src/api-mock/layer.ts",
+    "./assertions/exit": "./src/assertions/exit.ts",
+    "./db/layer": "./src/db/layer.ts",
+    "./http/platform-layer": "./src/http/platform-layer.ts",
+    "./runtime": "./src/runtime.ts"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0-rc.115",
+    "@effect/vitest": "4.0.0-rc.115",
+    "@q/api-definition": "workspace:*",
+    "@q/client": "workspace:*",
+    "@q/db": "workspace:*",
+    "@q/domain": "workspace:*",
+    "@q/factories": "workspace:*",
+    "@q/kit": "workspace:*",
+    "effect": "4.0.0-rc.115"
+  }
+}
