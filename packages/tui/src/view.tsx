@@ -177,24 +177,62 @@ const segments = (message: ChatMessage): ReadonlyArray<Segment> => {
   return out.length === 0 ? [{ _tag: "Text", text: "" }] : out
 }
 
+/** The call as the model made it: the tool and the argument that identifies the call, not every argument. */
+const describeCall = (part: ToolPart): string => {
+  const name = getToolName(part)
+  if (part.state === "input-streaming") return `${name}(…)`
+  if (part.state === "output-error") return `${name}(${JSON.stringify(part.input)})`
+  switch (part.type) {
+    case "tool-read": {
+      const { path, offset, limit } = part.input
+      const window = offset === undefined && limit === undefined ? "" : `:${offset ?? 1}${limit === undefined ? "" : `+${limit}`}`
+      return `read(${path}${window})`
+    }
+    case "tool-write":
+      return `write(${part.input.path})`
+    case "tool-edit":
+      return `edit(${part.input.path})`
+    case "tool-bash":
+      return `bash(${part.input.command})`
+    case "dynamic-tool":
+      return `${name}(${JSON.stringify(part.input)})`
+  }
+}
+
+/** What a finished call produced, in a few words. The content itself is for the model, not the screen. */
+const describeOutput = (part: Extract<ToolPart, { readonly state: "output-available" }>): string => {
+  switch (part.type) {
+    case "tool-read":
+      return `${part.output.totalLines} lines${part.output.truncated ? ", truncated" : ""}`
+    case "tool-write":
+      return `${part.output.bytes} bytes${part.output.created ? ", created" : ""}`
+    case "tool-edit":
+      return `${part.output.replacements} ${part.output.replacements === 1 ? "replacement" : "replacements"}`
+    case "tool-bash":
+      return `exit ${part.output.exitCode}${part.output.timedOut ? ", timed out" : ""}${part.output.truncated ? ", output truncated" : ""}`
+    case "dynamic-tool":
+      return JSON.stringify(part.output)
+  }
+}
+
 /** One line for a tool call: the call, then what became of it. */
 const describeTool = (part: ToolPart): string => {
-  const name = getToolName(part)
+  const call = describeCall(part)
   switch (part.state) {
     case "input-streaming":
-      return `${name}(…)`
+      return call
     case "input-available":
-      return `${name}(${JSON.stringify(part.input)}) running…`
+      return `${call} running…`
     case "approval-requested":
-      return `${name}(${JSON.stringify(part.input)}) → approve? y / n`
+      return `${call} → approve? y / n`
     case "approval-responded":
-      return `${name}(${JSON.stringify(part.input)}) → ${part.approval.approved ? "approved" : "denied"}`
+      return `${call} → ${part.approval.approved ? "approved" : "denied"}`
     case "output-available":
-      return `${name}(${JSON.stringify(part.input)}) → ${JSON.stringify(part.output)}`
+      return `${call} → ${describeOutput(part)}`
     case "output-error":
-      return `${name}(${JSON.stringify(part.input)}) → error: ${part.errorText}`
+      return `${call} → error: ${part.errorText}`
     case "output-denied":
-      return `${name}(${JSON.stringify(part.input)}) → denied`
+      return `${call} → denied`
   }
 }
 

@@ -49,7 +49,7 @@ A `*-repository.ts` is private to its module; other modules go through the modul
 ## The agent loop
 
 Messages are AI SDK `UIMessage`s typed by `AgentToolkit` (`@q/domain/agent/tools`); a tool part carries that tool's
-encoded input and output. `AgentService.step(messages)` is one model call as `UIMessageChunk`s, `start-step` to
+encoded input and output. `AgentService.step(messages, { cwd })` is one model call as `UIMessageChunk`s, `start-step` to
 `finish-step`; it is stateless. The loop is in `core/program/update.ts`:
 
 - `Turn`: `Idle` → `Accepting` (write-ahead `PromptAccepted`) → `Streaming {messageId, round}` → … → `Idle`.
@@ -59,11 +59,27 @@ encoded input and output. `AgentService.step(messages)` is one model call as `UI
 - `RespondedToolApproval` puts the answer on the part and starts the next round. Effect's `LanguageModel` runs approved
   tools at the start of that step; their results land on the parts of the earlier step, so transcript events snapshot
   the whole assistant message, and folding takes the last snapshot. A parked turn survives a restart.
+- A step that fails or dies is a `FailedStep`: the turn ends `Failed` with a notice. A defect never crashes the runtime, which
+  would leave the session `Streaming` with nothing on the screen.
 - Chunks reach the Model as they arrive; nothing waits on a clock. Deltas that arrive in one read are folded into one message (`coalesce`).
 - An API response streams Models until the conversation waits on the user (`Idle` or `AwaitingApproval`).
 
 `AgentConfig`: `Q_AGENT=echo|anthropic` (default: `anthropic` when `ANTHROPIC_API_KEY` is set, else `echo`),
-`Q_ANTHROPIC_MODEL`, `Q_ECHO_DELAY`. Tool handlers are stand-ins in `core/agent/tool-handlers.ts`.
+`Q_ANTHROPIC_MODEL`, `Q_ECHO_DELAY`.
+
+## Tools
+
+`read`, `write`, `edit`, `bash`, as pi ships them. Contracts in `domain/agent/tools.ts`; handlers in `core/agent/tool-handlers.ts`
+over `FileSystem`, `Path`, `ChildProcessSpawner` (Bun's, from `BunServices.layer` at the composition root).
+
+- Every tool is `failureMode: "return"`: a missing file or an ambiguous `edit` is `{ reason, message }` for the model, not a
+  failed turn. A non-zero exit code is a `bash` success value. No tool asks for approval on its own.
+- Paths resolve against the session's `cwd` (`CurrentSession`), which `AgentTurn` passes to `step`; the handlers are bound to
+  it per step (no I/O). Paths are not sandboxed. The system prompt names the directory.
+- Limits are constants in `tool-handlers.ts`: `read` caps at 2000 lines / 64 KiB and says `truncated`; `bash` gets 2 minutes
+  (or `timeoutMs`), keeps 1 MiB of interleaved output, reads the rest so the child never blocks, and reports `timedOut` with
+  exit code `-1` and what was printed. `edit` replaces text literally (`$` is not special).
+- The TUI shows a call as `tool(argument) → summary` (`bash(make) → exit 0`, `read(a.ts) → 12 lines`), never the content.
 
 ## Conventions
 
@@ -92,7 +108,7 @@ OpenTUI's FFI and `bun:sqlite` need Bun; Node's vitest cannot host them. Config:
 - Anything that must outlive an Effect (a server, a database) is built with `Layer.build` in the test's Scope, not with `Effect.provide`.
 - Pure `update` functions are tested with the `story` DSL from `@q/kit/story`. Schemas are tested with `it.effect.prop`.
 - `@q/test`: `DatabaseLayerTest` (in-memory SQLite + migrations), `makeApiClientTest(handlers)` (scripted server behind a real `ApiClient`), `assertFailsWithTag`, `awaiting`, `advancingUntil` (advance the `TestClock` step by step until a forked wait is done; one large adjust does not carry a paced stream to its end).
-- `@q/factories`: `makeSession`, `makeAnsweredModel`, `makeStreamingModel`, `makeAwaitingApprovalModel`, `makeTextStep`, `textOf`, `makePromptAccepted`, `makeStepEnded`, `makeTurnEnded`; `chat-chunk` builds the chunks of one step (`makeTextChunks`, `makeWeatherCallChunks`, `makeEmailApprovalChunks`, …) for `AgentService.layerScripted`. Override only the fields the test is about.
+- `@q/factories`: `makeSession`, `makeAnsweredModel`, `makeStreamingModel`, `makeAwaitingApprovalModel`, `makeTextStep`, `textOf`, `makePromptAccepted`, `makeStepEnded`, `makeTurnEnded`; `chat-chunk` builds the chunks of one step (`makeTextChunks`, `makeReadCallChunks`, `makeBashApprovalChunks`, …) for `AgentService.layerScripted`. Override only the fields the test is about.
 - Assert with `assert` from `@effect/vitest`; `expect` only for snapshots.
 - Time is `TestClock.adjust`. Completion is a message on `Runtime.messages`: fork the wait before the dispatch, join after. Never sleep or count yields.
 

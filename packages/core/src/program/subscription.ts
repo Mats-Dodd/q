@@ -1,8 +1,9 @@
 import { type ChatChunk, type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
 import * as Subscription from "@q/kit/subscription"
-import { Array, Effect, Option, Stream } from "effect"
+import { Array, Cause, Effect, Option, Stream } from "effect"
 
 import { AgentService } from "../agent/agent-service"
+import { CurrentSession } from "../session/current-session"
 import { type Message, MessageSchema } from "./message"
 
 // SUBSCRIPTION — chunks reach the Model the moment they arrive. Nothing here waits on a clock: a
@@ -37,7 +38,11 @@ export const coalesce = ([first, ...rest]: Array.NonEmptyReadonlyArray<Message>)
 /**
  * Runs one agent step while `model.turn` is `Streaming`. The deps are the step's identity, so a new
  * round starts a new stream over the messages as they are then, and leaving `Streaming` interrupts
- * the current one; the Model owns the lifetime.
+ * the current one; the Model owns the lifetime. Tools work in the session's directory.
+ *
+ * A step that fails, or dies, ends as `FailedStep`: the turn ends with a notice the user can read. Left
+ * to the runtime, a defect would crash it and leave the session `Streaming` forever with nothing on
+ * the screen. Interruption is not caught: that is how a round change stops the previous step.
  */
 export const AgentTurn = Subscription.make<ConversationModel, Message>()({
   modelToDeps: (model) =>
@@ -52,10 +57,13 @@ export const AgentTurn = Subscription.make<ConversationModel, Message>()({
       onNone: () => Stream.empty,
       onSome: ({ messageId, round }) =>
         Stream.unwrap(
-          Effect.map(AgentService, (agent) =>
-            agent.step(model.messages).pipe(
+          Effect.map(Effect.all([AgentService, CurrentSession]), ([agent, session]) =>
+            agent.step(model.messages, { cwd: session.cwd }).pipe(
               Stream.map((chunk) => MessageSchema.cases.ReceivedChunk.make({ messageId, round, chunk })),
               Stream.catch((error) => Stream.make(MessageSchema.cases.FailedStep.make({ messageId, round, error: error.message }))),
+              Stream.catchDefect((defect) =>
+                Stream.make(MessageSchema.cases.FailedStep.make({ messageId, round, error: Cause.pretty(Cause.die(defect)) })),
+              ),
               Stream.mapArray(coalesce),
             ),
           ),

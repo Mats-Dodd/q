@@ -110,21 +110,21 @@ it.live("escape cancels a streaming turn; a refused submit keeps the draft", () 
 
 it.live("a tool call is a line of its own; an approval request takes y or n from the keyboard", () =>
   Effect.gen(function* () {
-    const parked = makeAwaitingApprovalModel("email bob")
-    const sent = makeAnsweredModel("email bob", "Sent.", {
+    const parked = makeAwaitingApprovalModel("build it")
+    const sent = makeAnsweredModel("build it", "Done.", {
       messages: [
         parked.messages[0]!,
         makeAssistantMessage("1", [
           { type: "step-start" },
           {
-            type: "tool-send_email",
+            type: "tool-bash",
             toolCallId: "call-1",
             state: "output-available",
-            input: { to: "bob@example.com", subject: "hi", body: "hello" },
-            output: { sent: true, to: "bob@example.com" },
+            input: { command: "make" },
+            output: { exitCode: 0, output: "", truncated: false, timedOut: false },
             approval: { id: "approval-1", approved: true },
           },
-          ...makeTextStep("Sent."),
+          ...makeTextStep("Done."),
         ]),
       ],
     })
@@ -137,13 +137,13 @@ it.live("a tool call is a line of its own; an approval request takes y or n from
       },
     })
     yield* waitForFrame(setup, (frame) => frame.includes("Type a message") && frame.includes("Enter sends"))
-    yield* typeText(setup, "email bob")
+    yield* typeText(setup, "build it")
     setup.mockInput.pressEnter()
-    yield* waitForFrame(setup, (frame) => frame.includes("approve send_email? y / n"))
+    yield* waitForFrame(setup, (frame) => frame.includes("approve bash? y / n"))
 
     const asked = trim(setup.captureCharFrame())
-    assert.include(asked, "you › email bob")
-    assert.include(asked, "⚙ send_email(")
+    assert.include(asked, "you › build it")
+    assert.include(asked, "⚙ bash(make)")
     assert.include(asked, "approve? y / n")
     expect(asked).toMatchSnapshot()
 
@@ -151,9 +151,8 @@ it.live("a tool call is a line of its own; an approval request takes y or n from
     yield* typeText(setup, "y")
     yield* waitForFrame(setup, (frame) => frame.includes("Enter sends"))
     const done = trim(setup.captureCharFrame())
-    assert.include(done, "q › ⚙ send_email(")
-    assert.include(done, '"sent":true')
-    assert.include(done, "Sent.")
+    assert.include(done, "q › ⚙ bash(make) → exit 0")
+    assert.include(done, "Done.")
     assert.notInclude(done, "│ y")
     assert.deepStrictEqual(answers.at(-1), IntentSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
     expect(done).toMatchSnapshot()

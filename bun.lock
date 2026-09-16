@@ -92,6 +92,7 @@
         "effect-ai-ui": "workspace:*",
       },
       "devDependencies": {
+        "@effect/platform-bun": "4.0.0-rc.115",
         "@q/factories": "workspace:*",
         "@q/test": "workspace:*",
       },
@@ -162,6 +163,7 @@
         "@q/domain": "workspace:*",
         "@q/kit": "workspace:*",
         "effect": "4.0.0-rc.115",
+        "effect-ai-ui": "workspace:*",
         "solid-js": "1.9.12",
       },
       "devDependencies": {

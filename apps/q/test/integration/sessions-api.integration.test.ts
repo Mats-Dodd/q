@@ -2,7 +2,7 @@ import { assert, layer } from "@effect/vitest"
 import { AgentService } from "@q/core/agent/agent-service"
 import { type ChatChunk, type ConversationModel, IntentSchema, TurnSchema } from "@q/domain/conversation/model"
 import { ResumeSchema } from "@q/domain/session/model"
-import { makeEmailApprovalChunks, makeEmailSentChunk, makeTextChunks } from "@q/factories/chat-chunk"
+import { makeBashApprovalChunks, makeBashOutputChunk, makeTextChunks } from "@q/factories/chat-chunk"
 import { textOf } from "@q/factories/conversation-model"
 import { makeSessionId } from "@q/factories/session"
 import { HttpPlatformLayerTest } from "@q/test/http/platform-layer"
@@ -150,8 +150,8 @@ layer(HttpPlatformLayerTest, { excludeTestServices: true })("sessions API", (it)
     Effect.gen(function* () {
       const api = yield* makeApiClientIntegration(
         AgentService.layerScripted([
-          makeEmailApprovalChunks("call-1", "approval-1"),
-          [makeEmailSentChunk("call-1"), ...makeTextChunks("Sent.")],
+          makeBashApprovalChunks("call-1", "approval-1"),
+          [makeBashOutputChunk("call-1"), ...makeTextChunks("Done.")],
         ]),
       )
       const session = yield* api.sessions.openSession({ payload: { cwd: "/d", resume: ResumeSchema.cases.New.make({}) } })
@@ -159,7 +159,7 @@ layer(HttpPlatformLayerTest, { excludeTestServices: true })("sessions API", (it)
       const parked = yield* Stream.runCollect(
         yield* api.sessions.sendIntent({
           params: { id: session.id },
-          payload: IntentSchema.cases.SubmittedPrompt.make({ text: "email bob" }),
+          payload: IntentSchema.cases.SubmittedPrompt.make({ text: "build it" }),
         }),
       )
       assert.deepStrictEqual(parked.at(-1)!.turn, TurnSchema.cases.AwaitingApproval.make({ messageId: "1", round: 0 }))
@@ -174,10 +174,10 @@ layer(HttpPlatformLayerTest, { excludeTestServices: true })("sessions API", (it)
       )
       const last = resumed.at(-1)!
       assert.deepStrictEqual(last.turn, TurnSchema.cases.Idle.make({}))
-      assert.deepStrictEqual(texts(last), ["email bob", "Sent."])
+      assert.deepStrictEqual(texts(last), ["build it", "Done."])
       assert.deepStrictEqual(
         last.messages[1]!.parts.map((p) => p.type),
-        ["step-start", "tool-send_email", "step-start", "text"],
+        ["step-start", "tool-bash", "step-start", "text"],
       )
     }),
   )

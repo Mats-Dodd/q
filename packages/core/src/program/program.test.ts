@@ -3,13 +3,13 @@ import { type ChatChunk, type ChatMessage, type ChatMessagePart, type Conversati
 import { PersistenceError } from "@q/domain/persistence-error"
 import { ResumeSchema } from "@q/domain/session/model"
 import { type ConversationEvent, ConversationEventSchema, OutcomeSchema } from "@q/domain/transcript/model"
-import { makeEmailApprovalChunks, makeEmailSentChunk, makeTextChunks, makeWeatherCallChunks } from "@q/factories/chat-chunk"
+import { makeBashApprovalChunks, makeBashOutputChunk, makeReadCallChunks, makeTextChunks } from "@q/factories/chat-chunk"
 import { textOf } from "@q/factories/conversation-model"
 import { makeSession } from "@q/factories/session"
 import * as Runtime from "@q/kit/runtime"
 import { CryptoLayerTest, DatabaseLayerTest } from "@q/test/db/layer"
 import { advancingUntil, awaiting } from "@q/test/runtime"
-import { Context, Deferred, Effect, Fiber, Layer, Ref, Semaphore, Stream } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Semaphore, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { isToolUIPart } from "effect-ai-ui/UIMessage"
 
@@ -171,37 +171,37 @@ layer(Shared)("program", (it) => {
   it.effect("a tool call runs the loop: the next step sees the result, and each step is recorded", () =>
     Effect.gen(function* () {
       const seen = yield* Ref.make<ReadonlyArray<ReadonlyArray<ChatMessage>>>([])
-      const steps: ReadonlyArray<ReadonlyArray<ChatChunk>> = [makeWeatherCallChunks("call-1", "Oslo"), makeTextChunks("6°C, clear.")]
+      const steps: ReadonlyArray<ReadonlyArray<ChatChunk>> = [makeReadCallChunks("call-1", "README.md"), makeTextChunks("A README.")]
       const inner = yield* Layer.build(AgentService.layerScripted(steps)).pipe(Effect.map((c) => Context.get(c, AgentService)))
       const scripted = AgentService.of({
-        step: (messages) =>
+        step: (messages, options) =>
           Stream.unwrap(
             Effect.as(
               Ref.update(seen, (all) => [...all, messages]),
-              inner.step(messages),
+              inner.step(messages, options),
             ),
           ),
       })
       const runtime = yield* Runtime.make(program).pipe(Effect.provideService(AgentService, scripted))
       const commit = yield* awaiting(runtime, committed("1"))
 
-      runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "weather in Oslo?" }))
+      runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "what is in the README?" }))
       yield* advancingUntil(commit)
 
       assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Idle.make({}))
-      assert.strictEqual(assistantText(runtime), "6°C, clear.")
+      assert.strictEqual(assistantText(runtime), "A README.")
       const parts = runtime.model().messages[1]!.parts
       assert.deepStrictEqual(
         parts.map((p) => p.type),
-        ["step-start", "tool-get_weather", "step-start", "text"],
+        ["step-start", "tool-read", "step-start", "text"],
       )
 
       // Round 1 was called with the tool result already in the message.
       const calls = yield* Ref.get(seen)
       assert.strictEqual(calls.length, 2)
       assert.deepStrictEqual(calls[0]![1]!.parts, [])
-      const weather = calls[1]![1]!.parts[1]
-      assert.isTrue(weather !== undefined && isToolUIPart(weather) && weather.state === "output-available")
+      const read = calls[1]![1]!.parts[1]
+      assert.isTrue(read !== undefined && isToolUIPart(read) && read.state === "output-available")
 
       assert.deepStrictEqual(
         (yield* loadTranscript).map((e) => e._tag),
@@ -215,15 +215,15 @@ layer(Shared)("program", (it) => {
   it.effect("an approval parks the turn across a restart; the answer resumes it", () =>
     Effect.gen(function* () {
       const steps: ReadonlyArray<ReadonlyArray<ChatChunk>> = [
-        makeEmailApprovalChunks("call-1", "approval-1"),
-        [makeEmailSentChunk("call-1"), ...makeTextChunks("Sent.")],
+        makeBashApprovalChunks("call-1", "approval-1"),
+        [makeBashOutputChunk("call-1"), ...makeTextChunks("Done.")],
       ]
       // One agent for both runtimes: it plays its first step for the first, its second for the second.
       const scripted = yield* Layer.build(AgentService.layerScripted(steps)).pipe(Effect.map((c) => Context.get(c, AgentService)))
       const runtime = yield* Runtime.make(program).pipe(Effect.provideService(AgentService, scripted))
       const parked = yield* awaiting(runtime, (m) => m._tag === "SucceededCommitStep")
 
-      runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "email bob" }))
+      runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "build it" }))
       yield* advancingUntil(parked)
       assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.AwaitingApproval.make({ messageId: "1", round: 0 }))
 
@@ -236,9 +236,9 @@ layer(Shared)("program", (it) => {
       yield* advancingUntil(commit)
 
       assert.deepStrictEqual(restored.model().turn, TurnSchema.cases.Idle.make({}))
-      assert.strictEqual(assistantText(restored), "Sent.")
-      const email = restored.model().messages[1]!.parts[1]
-      assert.isTrue(email !== undefined && isToolUIPart(email) && email.type === "tool-send_email" && email.state === "output-available")
+      assert.strictEqual(assistantText(restored), "Done.")
+      const bash = restored.model().messages[1]!.parts[1]
+      assert.isTrue(bash !== undefined && isToolUIPart(bash) && bash.type === "tool-bash" && bash.state === "output-available")
       assert.deepStrictEqual(
         (yield* loadTranscript).map((e) => e._tag),
         ["PromptAccepted", "StepEnded", "TurnEnded"],
@@ -275,6 +275,27 @@ layer(Shared)("program", (it) => {
           outcome: OutcomeSchema.cases.Failed.make({ error: "offline" }),
         }),
       )
+    }).pipe(withNewSession),
+  )
+
+  it.effect("a step that dies ends the turn as failed too, instead of leaving it streaming forever", () =>
+    Effect.gen(function* () {
+      const dying = Layer.succeed(
+        AgentService,
+        AgentService.of({
+          step: () => Stream.make<ReadonlyArray<ChatChunk>>({ type: "start-step" }).pipe(Stream.concat(Stream.die(new Error("boom")))),
+        }),
+      )
+      const runtime = yield* Runtime.make(program).pipe(Effect.provide(dying))
+      const commit = yield* awaiting(runtime, committed("1"))
+
+      runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "hi" }))
+      yield* advancingUntil(commit)
+      assert.isFalse(runtime.crashed())
+      assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Idle.make({}))
+      assert.isTrue(Option.exists(runtime.model().notice, (notice) => notice.includes("boom")))
+      const transcript = yield* loadTranscript
+      assert.strictEqual(transcript.at(-1)?._tag, "TurnEnded")
     }).pipe(withNewSession),
   )
 

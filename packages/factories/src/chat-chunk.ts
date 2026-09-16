@@ -9,33 +9,25 @@ export const makeTextChunks = (text: string, id = "text-0"): ReadonlyArray<ChatC
   { type: "text-end", id },
 ]
 
-/** A `get_weather` call the agent ran: input, then output. */
-export const makeWeatherCallChunks = (
-  toolCallId: string,
-  city: string,
-  output: { readonly temperatureC: number; readonly sky: string } = { temperatureC: 6, sky: "clear" },
-): ReadonlyArray<ChatChunk> => [
-  { type: "tool-input-start", toolCallId, toolName: "get_weather" },
-  { type: "tool-input-available", toolCallId, toolName: "get_weather", input: { city } },
-  { type: "tool-output-available", toolCallId, output: { city, ...output } },
+/** A `read` call the agent ran: input, then output. */
+export const makeReadCallChunks = (toolCallId: string, path: string, content = "hello\n"): ReadonlyArray<ChatChunk> => [
+  { type: "tool-input-start", toolCallId, toolName: "read" },
+  { type: "tool-input-available", toolCallId, toolName: "read", input: { path } },
+  { type: "tool-output-available", toolCallId, output: { path, content, totalLines: content.split("\n").length - 1, truncated: false } },
 ]
 
-/** A `send_email` call the agent parked for the user's approval. */
-export const makeEmailApprovalChunks = (
-  toolCallId: string,
-  approvalId: string,
-  input: { readonly to: string; readonly subject: string; readonly body: string } = { to: "a@b.c", subject: "hi", body: "hello" },
-): ReadonlyArray<ChatChunk> => [
-  { type: "tool-input-start", toolCallId, toolName: "send_email" },
-  { type: "tool-input-available", toolCallId, toolName: "send_email", input },
+/** A `bash` call the agent parked for the user's approval. No tool asks for approval by itself; a provider or a test may. */
+export const makeBashApprovalChunks = (toolCallId: string, approvalId: string, command = "make"): ReadonlyArray<ChatChunk> => [
+  { type: "tool-input-start", toolCallId, toolName: "bash" },
+  { type: "tool-input-available", toolCallId, toolName: "bash", input: { command } },
   { type: "tool-approval-request", toolCallId, approvalId },
 ]
 
-/** The result of an approved `send_email`, as the step after the approval emits it. */
-export const makeEmailSentChunk = (toolCallId: string, to = "a@b.c"): ChatChunk => ({
+/** The result of an approved `bash`, as the step after the approval emits it. */
+export const makeBashOutputChunk = (toolCallId: string, output = "", exitCode = 0): ChatChunk => ({
   type: "tool-output-available",
   toolCallId,
-  output: { sent: true, to },
+  output: { exitCode, output, truncated: false, timedOut: false },
 })
 
 /** The result of a denied call, as the step after the denial emits it. */

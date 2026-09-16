@@ -1,12 +1,12 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`a tool call is a line of its own; an approval request takes y or n from the keyboard 1`] = `
-" you › email bob
- q › ⚙ send_email({"to":"bob@example.
- com","subject":"hi","body":"hello"}) →
- approve? y / n
+" you › build it
+ q › ⚙ bash(make) → approve? y / n
 
- approve send_email? y / n · Esc cancels
+
+
+ approve bash? y / n · Esc cancels
 ╭──────────────────────────────────────╮
 │ Type a message…                      │
 ╰──────────────────────────────────────╯
@@ -14,11 +14,11 @@ exports[`a tool call is a line of its own; an approval request takes y or n from
 `;
 
 exports[`a tool call is a line of its own; an approval request takes y or n from the keyboard 2`] = `
-" you › email bob
- q › ⚙ send_email({"to":"bob@example.
- com","subject":"hi","body":"hello"}) →
- {"sent":true,"to":"bob@example.com"}
-     Sent.
+" you › build it
+ q › ⚙ bash(make) → exit 0
+     Done.
+
+
  Enter sends · Esc cancels · Ctrl+C
 ╭──────────────────────────────────────╮
 │ Type a message…                      │

@@ -33,19 +33,19 @@ export const makeAnsweredModel = (prompt: string, reply: string, overrides: Part
   ...overrides,
 })
 
-/** A `send_email` call waiting on the user, as the assistant message holds it. */
-export const makeEmailApprovalPart = (toolCallId = "call-1", approvalId = "approval-1"): ChatMessagePart => ({
-  type: "tool-send_email",
+/** A `bash` call waiting on the user, as the assistant message holds it. */
+export const makeBashApprovalPart = (toolCallId = "call-1", approvalId = "approval-1", command = "make"): ChatMessagePart => ({
+  type: "tool-bash",
   toolCallId,
   state: "approval-requested",
-  input: { to: "bob@example.com", subject: "hi", body: "hello" },
+  input: { command },
   approval: { id: approvalId },
 })
 
-/** Parked: `prompt` led to a `send_email` call the user must approve. */
+/** Parked: `prompt` led to a `bash` call the user must approve. */
 export const makeAwaitingApprovalModel = (prompt: string, overrides: Partial<ConversationModel> = {}): ConversationModel => ({
   ...makeAnsweredModel(prompt, ""),
-  messages: [makeUserMessage("0", prompt), makeAssistantMessage("1", [{ type: "step-start" }, makeEmailApprovalPart()])],
+  messages: [makeUserMessage("0", prompt), makeAssistantMessage("1", [{ type: "step-start" }, makeBashApprovalPart()])],
   turn: TurnSchema.cases.AwaitingApproval.make({ messageId: "1", round: 0 }),
   ...overrides,
 })
