@@ -4,11 +4,12 @@ A terminal coding agent. Effect v4 (`4.0.0-rc.*`) on Bun. One binary (`apps/q`) 
 
 ## Commands
 
-- `bun run verify` — the whole gate: typecheck, Effect diagnostics, lint, format check, knip, depcruise, tests. Run it before you finish.
+- `bun run verify` — the whole gate: typecheck, lint, format check, knip, depcruise, tests. Run it before you finish. `git push` runs it too.
 - `bun run test` — vitest on the Bun runtime (`bun --bun vitest run`). Never `bun test` or `jest`.
-- `bun run typecheck` — `tsc` (TypeScript 7, patched by `@effect/tsgo` so Effect diagnostics come out of `tsc`).
-- `bun run check` — Effect diagnostics alone (`effect-tsgo diagnostics`).
-- `bun run lint` / `bun run format` — oxlint / oxfmt. Config: `.oxlintrc.json`, `.oxfmtrc.json`.
+- `bun run typecheck` — `tsc` (TypeScript 7, patched by `@effect/tsgo`; its Effect diagnostics are off, oxlint reports them).
+- `bun run lint` — oxlint, type-aware, patched by `@effect/tsgo`: every Effect diagnostic (`effecttsgo/*`), the type-aware
+  `typescript/*` rules, `import`, `unicorn`, `promise`, `vitest`. Everything is an error; there are no warnings. Config: `.oxlintrc.json`.
+- `bun run format` — oxfmt. Config: `.oxfmtrc.json`.
 - `bun run knip` — unused files, exports and dependencies. Config: `knip.json`.
 - `bun run depcruise` — the dependency rules below, enforced. Config: `.dependency-cruiser.cjs`.
 - `bun run start -- <flags>` — run the CLI from source. `bun run build` — a single binary at `apps/q/dist/q`.
@@ -83,12 +84,17 @@ over `FileSystem`, `Path`, `ChildProcessSpawner` (Bun's, from `BunServices.layer
 
 ## Conventions
 
-- Files are kebab-case. Modules are imported by path (`@q/core/session/session-service`); there are no barrel `index.ts` files.
+- Files are kebab-case. Modules are imported by path (`@q/core/session/session-service`), also inside their own package (the package
+  self-references through its `exports` map; `apps/q` is `q/layers/app`). Never `../`. There are no barrel `index.ts` files.
+- `import type { X }` on its own line, never `import { type X }`. `ReadonlyArray<T>`, not `readonly T[]`. `interface`, not `type`, for object shapes.
+- Braces on every `if` and `case`. No nested ternaries, no negated conditions with an `else`, no `!` non-null assertions (narrow, or `assert.fail`).
+- A Schema class is built with `Foo.make({...})`, not `new Foo({...})`. `Schema.is(Foo)`, not `instanceof`.
 - One service per file, as a `Context.Service` class with a static `layer`. Repositories return `PersistenceError`; services translate absence into domain errors (`SessionNotFoundError`).
 - Domain errors are `Schema.TaggedError` so they cross the API. Ids are branded (`SessionId`).
 - Persistence models are `Model.Class`; the API carries their JSON codec. Wire ids and counters are `Schema.Int`.
-- Layers are provided once, at the entry point (`apps/q/src/cli.ts`) or at a Layer's boundary. Inside an Effect, prefer `Layer.build` in an explicit Scope over `Effect.provide`. The `strictEffectProvide` diagnostic points at the exceptions; test bodies are allowed.
-- Effect diagnostics are configured in `packages/typescript-config/base.json`. Silence one line with `// @effect-diagnostics-next-line <rule>:off` and say why.
+- Layers are provided once, at the entry point (`apps/q/src/cli.ts`) or at a Layer's boundary. Inside an Effect, `Layer.build` in an explicit Scope, never `Effect.provide` (`effecttsgo/strict-effect-provide`); in a test body, `providing` from `@q/test/runtime`.
+- A rule is silenced on one line with `// oxlint-disable-next-line <rule> -- <why>`. The reason is not optional. A rule that is off for the whole repo has its reason in `.oxlintrc.json`.
+- A cast that narrows (`as X`) is `typescript/no-unsafe-type-assertion`: prove it with a type guard or a decode, or disable the line and say what makes it safe.
 - Backward compat is never a consideration.
 
 ## Bun
@@ -104,12 +110,12 @@ OpenTUI's FFI and `bun:sqlite` need Bun; Node's vitest cannot host them. Config:
 
 - `it.effect` runs on a `TestClock` (and `TestConsole`) in its own Scope. `it.live` uses the real clock.
 - `layer(L)("name", (it) => ...)` builds `L` once for the block. `excludeTestServices: true` where the real clock matters (SQLite `created_at`, OpenTUI frames).
-- `Effect.provide` memoizes by Layer reference. To rebuild a service over a substitute inside a block that already built it, use `Layer.fresh`. To share one stateful service (a scripted agent) between two runtimes, `Layer.build` it once and `Effect.provideService` it to both.
-- Anything that must outlive an Effect (a server, a database) is built with `Layer.build` in the test's Scope, not with `Effect.provide`.
+- Never `Effect.provide` in a test body: it closes the Layer's scope when the body returns, before a runtime made inside has finished with it. `providing(layer)` from `@q/test/runtime` builds the Layer in the test's Scope and gives its context to the body. Layers memoize by reference: to rebuild a service over a substitute inside a block that already built it, use `Layer.fresh`. To share one stateful service (a scripted agent) between two runtimes, `Layer.build` it once and `Effect.provideService` it to both.
 - Pure `update` functions are tested with the `story` DSL from `@q/kit/story`. Schemas are tested with `it.effect.prop`.
-- `@q/test`: `DatabaseLayerTest` (in-memory SQLite + migrations), `makeApiClientTest(handlers)` (scripted server behind a real `ApiClient`), `assertFailsWithTag`, `awaiting`, `advancingUntil` (advance the `TestClock` step by step until a forked wait is done; one large adjust does not carry a paced stream to its end).
+- `@q/test`: `DatabaseLayerTest` (in-memory SQLite + migrations), `makeApiClientTest(handlers)` (scripted server behind a real `ApiClient`), `assertFailsWithTag`, `providing`, `awaiting`, `advancingUntil` (advance the `TestClock` step by step until a forked wait is done; one large adjust does not carry a paced stream to its end).
 - `@q/factories`: `makeSession`, `makeAnsweredModel`, `makeStreamingModel`, `makeAwaitingApprovalModel`, `makeTextStep`, `textOf`, `makePromptAccepted`, `makeStepEnded`, `makeTurnEnded`; `chat-chunk` builds the chunks of one step (`makeTextChunks`, `makeReadCallChunks`, `makeBashApprovalChunks`, …) for `AgentService.layerScripted`. Override only the fields the test is about.
-- Assert with `assert` from `@effect/vitest`; `expect` only for snapshots.
+- Assert with `assert` from `@effect/vitest`; `expect` only for snapshots, and every snapshot has a hint (`toMatchSnapshot("asked")`). A helper that asserts is named `assert…` (`assertUnchanged`, `assertNone`); `vitest/expect-expect` counts those.
+- Tests follow the same rules as source. A wire fixture that needs `null` disables `unicorn/no-null` around itself and says why.
 - Time is `TestClock.adjust`. Completion is a message on `Runtime.messages`: fork the wait before the dispatch, join after. Never sleep or count yields.
 
 ```ts

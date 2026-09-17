@@ -1,7 +1,8 @@
 import { assert, expect, it } from "@effect/vitest"
 import { testRender } from "@opentui/solid"
 import { openSession, Transport } from "@q/client/transport/transport-service"
-import { type Intent, IntentSchema } from "@q/domain/conversation/model"
+import { IntentSchema } from "@q/domain/conversation/model"
+import type { Intent } from "@q/domain/conversation/model"
 import { ResumeSchema } from "@q/domain/session/model"
 import {
   makeAnsweredModel,
@@ -9,8 +10,10 @@ import {
   makeAwaitingApprovalModel,
   makeStreamingModel,
   makeTextStep,
+  makeUserMessage,
 } from "@q/factories/conversation-model"
-import { defaultSessionsHandlers, makeApiClientTest, type SessionsHandlersTest } from "@q/test/api-mock/layer"
+import { defaultSessionsHandlers, makeApiClientTest } from "@q/test/api-mock/layer"
+import type { SessionsHandlersTest } from "@q/test/api-mock/layer"
 import { Effect, Layer, Stream } from "effect"
 
 import { App } from "./view"
@@ -54,7 +57,7 @@ it.live("typing a prompt and pressing Enter echoes it back", () =>
     const frame = trim(setup.captureCharFrame())
     assert.include(frame, "you › hello")
     assert.notInclude(frame, "hellohello")
-    expect(frame).toMatchSnapshot()
+    expect(frame).toMatchSnapshot("echoed")
   }),
 )
 
@@ -113,7 +116,7 @@ it.live("a tool call is a line of its own; an approval request takes y or n from
     const parked = makeAwaitingApprovalModel("build it")
     const sent = makeAnsweredModel("build it", "Done.", {
       messages: [
-        parked.messages[0]!,
+        makeUserMessage("0", "build it"),
         makeAssistantMessage("1", [
           { type: "step-start" },
           {
@@ -145,7 +148,7 @@ it.live("a tool call is a line of its own; an approval request takes y or n from
     assert.include(asked, "you › build it")
     assert.include(asked, "⚙ bash(make)")
     assert.include(asked, "approve? y / n")
-    expect(asked).toMatchSnapshot()
+    expect(asked).toMatchSnapshot("asked")
 
     // `y` is an answer, not a character of the draft.
     yield* typeText(setup, "y")
@@ -155,6 +158,6 @@ it.live("a tool call is a line of its own; an approval request takes y or n from
     assert.include(done, "Done.")
     assert.notInclude(done, "│ y")
     assert.deepStrictEqual(answers.at(-1), IntentSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
-    expect(done).toMatchSnapshot()
+    expect(done).toMatchSnapshot("answered")
   }),
 )

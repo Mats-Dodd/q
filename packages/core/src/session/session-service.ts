@@ -1,6 +1,7 @@
 import { PersistenceError } from "@q/domain/persistence-error"
 import { SessionNotFoundError } from "@q/domain/session/errors"
-import { type Resume, ResumeSchema, Session, SessionId } from "@q/domain/session/model"
+import { ResumeSchema, Session, SessionId } from "@q/domain/session/model"
+import type { Resume } from "@q/domain/session/model"
 import { Context, Crypto, Effect, Layer } from "effect"
 import type { SqlError } from "effect/unstable/sql"
 
@@ -34,14 +35,14 @@ export class SessionService extends Context.Service<SessionService, SessionServi
       )
 
       const latest = Effect.fn("SessionService.latest")(function* latest(cwd: string) {
-        const sessions = yield* repository.findByCwd(cwd)
-        return sessions.length === 0 ? yield* create(cwd) : sessions[0]!
+        const [newest] = yield* repository.findByCwd(cwd)
+        return newest ?? (yield* create(cwd))
       })
 
       const find = Effect.fn("SessionService.find")(function* find(id: SessionId) {
         return yield* repository
           .findById(id)
-          .pipe(Effect.catchTag("NoSuchElementError", () => Effect.fail(new SessionNotFoundError({ sessionId: id }))))
+          .pipe(Effect.catchTag("NoSuchElementError", () => Effect.fail(SessionNotFoundError.make({ sessionId: id }))))
       })
 
       const findById = Effect.fn("SessionService.findById")((id: SessionId) => find(id), Effect.catchTag("SqlError", toPersistenceError))
@@ -68,4 +69,4 @@ export class SessionService extends Context.Service<SessionService, SessionServi
   static readonly live = SessionService.layer.pipe(Layer.provide(SessionRepository.layer))
 }
 
-const toPersistenceError = (cause: SqlError.SqlError) => Effect.fail(new PersistenceError({ cause, message: cause.message }))
+const toPersistenceError = (cause: SqlError.SqlError) => Effect.fail(PersistenceError.make({ cause, message: cause.message }))

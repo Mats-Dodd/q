@@ -1,18 +1,22 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { AgentTools } from "@q/domain/agent/tools"
-import { type ChatChunk, type ChatMessagePart, type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
+import { TurnSchema } from "@q/domain/conversation/model"
+import type { ChatChunk, ChatMessagePart, ConversationModel } from "@q/domain/conversation/model"
 import { ConversationEventSchema, OutcomeSchema } from "@q/domain/transcript/model"
 import { makeDeniedChunk, makeBashApprovalChunks, makeBashOutputChunk, makeReadCallChunks, makeTextChunks } from "@q/factories/chat-chunk"
 import { makeStepEnded, makeTurnEnded } from "@q/factories/conversation-event"
 import { makeAssistantMessage, makeTextStep, makeUserMessage } from "@q/factories/conversation-model"
-import { type Step, expectCommands, given, meanwhile, message, model, resolve, story } from "@q/kit/story"
+import { expectCommands, given, meanwhile, message, model, resolve, story } from "@q/kit/story"
+import type { Step } from "@q/kit/story"
 import { Option } from "effect"
-import { type AnyToolUIPart, isToolUIPart } from "effect-ai-ui/UIMessage"
+import { isToolUIPart } from "effect-ai-ui/UIMessage"
+import type { AnyToolUIPart } from "effect-ai-ui/UIMessage"
 
-import type { CurrentSession } from "../session/current-session"
-import type { TranscriptService } from "../transcript/transcript-service"
+import type { CurrentSession } from "@q/core/session/current-session"
+import type { TranscriptService } from "@q/core/transcript/transcript-service"
 import { AcceptPrompt, CommitStep, CommitTurn } from "./command"
-import { type Message, MessageSchema } from "./message"
+import { MessageSchema } from "./message"
+import type { Message } from "./message"
 import { init, update } from "./update"
 
 const fresh = () => init({ events: [] }).model
@@ -26,7 +30,7 @@ const streaming = (): ConversationModel =>
     resolve(AcceptPrompt, MessageSchema.cases.SucceededAcceptPrompt.make({})),
   ).model
 
-const unchanged = (before: ConversationModel, msg: Message) => assert.strictEqual(update(before, msg).model, before)
+const assertUnchanged = (before: ConversationModel, msg: Message) => assert.strictEqual(update(before, msg).model, before)
 
 type StoryStep = Step<ConversationModel, Message, CurrentSession | TranscriptService>
 
@@ -55,7 +59,9 @@ const assistantText = (m: ConversationModel): string =>
 /** The part at `index` of the assistant message, which must be a tool part. */
 const toolAt = (m: ConversationModel, index: number): AnyToolUIPart<AgentTools> => {
   const part = assistantParts(m)[index]
-  if (part === undefined || !isToolUIPart(part)) throw new Error(`no tool part at ${index}`)
+  if (part === undefined || !isToolUIPart(part)) {
+    throw new Error(`no tool part at ${index}`)
+  }
   return part
 }
 
@@ -152,7 +158,7 @@ describe("a step of text ends the turn", () => {
 
   it("a saved turn is a fact the model does not need", () => {
     const idle = step(streaming(), makeTextChunks("x"))
-    unchanged(idle, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" }))
+    assertUnchanged(idle, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" }))
   })
 
   it("a failed commit is a notice; the message stays", () => {
@@ -187,7 +193,7 @@ describe("a step of text ends the turn", () => {
     const before = streaming()
     const after = update(before, startStep()).model
     assert.deepStrictEqual(assistantParts(after), [{ type: "step-start" }])
-    assert.strictEqual(after.messages[0], before.messages[0]!)
+    assert.strictEqual(after.messages[0], before.messages[0])
     assert.strictEqual(after.turn, before.turn)
   })
 })
@@ -236,8 +242,8 @@ describe("the loop", () => {
   it("a chunk for the previous round is late and ignored", () => {
     const second = step(streaming(), makeReadCallChunks("call-1", "README.md"))
     assert.deepStrictEqual(second.turn, streamingAt(1))
-    unchanged(second, chunk({ type: "text-start", id: "late" }, 0))
-    unchanged(second, finishStep(0))
+    assertUnchanged(second, chunk({ type: "text-start", id: "late" }, 0))
+    assertUnchanged(second, finishStep(0))
   })
 
   it("a tool call left without a result ends the turn rather than asking the model about it", () => {
@@ -351,43 +357,46 @@ describe("approvals", () => {
   it("escape while parked cancels the turn; the request is left as it was", () => {
     const [command] = update(parked(), MessageSchema.cases.PressedEscape.make({})).commands ?? []
     assert.strictEqual(command?.name, "CommitTurn")
-    assert.deepStrictEqual((command?.args as { outcome: unknown } | undefined)?.outcome, OutcomeSchema.cases.Cancelled.make({}))
+    assert.deepStrictEqual(command?.args?.outcome, OutcomeSchema.cases.Cancelled.make({}))
   })
 
   it("answers that fit nothing are ignored by reference", () => {
-    unchanged(parked(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-99", approved: true }))
-    unchanged(streaming(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
-    unchanged(fresh(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
+    assertUnchanged(parked(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-99", approved: true }))
+    assertUnchanged(streaming(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
+    assertUnchanged(fresh(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
     const answered = update(parked(), MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true })).model
-    unchanged(answered, MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
+    assertUnchanged(answered, MessageSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }))
   })
 })
 
 describe("messages that do not fit the current state are ignored by reference", () => {
   it("blank prompt, prompt while not idle", () => {
-    unchanged(fresh(), MessageSchema.cases.SubmittedPrompt.make({ text: "   " }))
+    assertUnchanged(fresh(), MessageSchema.cases.SubmittedPrompt.make({ text: "   " }))
     const accepting = update(fresh(), MessageSchema.cases.SubmittedPrompt.make({ text: "one" })).model
-    unchanged(accepting, MessageSchema.cases.SubmittedPrompt.make({ text: "two" }))
-    unchanged(streaming(), MessageSchema.cases.SubmittedPrompt.make({ text: "two" }))
+    assertUnchanged(accepting, MessageSchema.cases.SubmittedPrompt.make({ text: "two" }))
+    assertUnchanged(streaming(), MessageSchema.cases.SubmittedPrompt.make({ text: "two" }))
   })
 
   it("escape while idle or accepting", () => {
-    unchanged(fresh(), MessageSchema.cases.PressedEscape.make({}))
-    unchanged(update(fresh(), MessageSchema.cases.SubmittedPrompt.make({ text: "one" })).model, MessageSchema.cases.PressedEscape.make({}))
-    unchanged(step(streaming(), makeTextChunks("x")), MessageSchema.cases.PressedEscape.make({}))
+    assertUnchanged(fresh(), MessageSchema.cases.PressedEscape.make({}))
+    assertUnchanged(
+      update(fresh(), MessageSchema.cases.SubmittedPrompt.make({ text: "one" })).model,
+      MessageSchema.cases.PressedEscape.make({}),
+    )
+    assertUnchanged(step(streaming(), makeTextChunks("x")), MessageSchema.cases.PressedEscape.make({}))
   })
 
   it("chunks and failures for a foreign or finished step", () => {
     const live = streaming()
-    unchanged(live, chunk({ type: "start-step" }, 0, "0"))
-    unchanged(live, chunk({ type: "start-step" }, 0, "99"))
-    unchanged(live, chunk({ type: "start-step" }, 1))
-    unchanged(live, MessageSchema.cases.FailedStep.make({ messageId: "99", round: 0, error: "x" }))
+    assertUnchanged(live, chunk({ type: "start-step" }, 0, "0"))
+    assertUnchanged(live, chunk({ type: "start-step" }, 0, "99"))
+    assertUnchanged(live, chunk({ type: "start-step" }, 1))
+    assertUnchanged(live, MessageSchema.cases.FailedStep.make({ messageId: "99", round: 0, error: "x" }))
 
     const ended = update(live, MessageSchema.cases.PressedEscape.make({})).model
-    unchanged(ended, chunk({ type: "start-step" }))
-    unchanged(ended, finishStep())
-    unchanged(ended, MessageSchema.cases.FailedStep.make({ messageId: "1", round: 0, error: "late" }))
+    assertUnchanged(ended, chunk({ type: "start-step" }))
+    assertUnchanged(ended, finishStep())
+    assertUnchanged(ended, MessageSchema.cases.FailedStep.make({ messageId: "1", round: 0, error: "late" }))
   })
 
   it("a stale finish from a cancelled turn cannot end the next turn", () => {
@@ -400,13 +409,13 @@ describe("messages that do not fit the current state are ignored by reference", 
       resolve(AcceptPrompt, MessageSchema.cases.SucceededAcceptPrompt.make({})),
       model((m) => assert.deepStrictEqual(m.turn, TurnSchema.cases.Streaming.make({ messageId: "3", round: 0 }))),
     )
-    unchanged(second.model, finishStep())
-    unchanged(second.model, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" }))
+    assertUnchanged(second.model, finishStep())
+    assertUnchanged(second.model, MessageSchema.cases.SucceededCommitTurn.make({ messageId: "1" }))
   })
 
   it("accept results while idle", () => {
-    unchanged(fresh(), MessageSchema.cases.SucceededAcceptPrompt.make({}))
-    unchanged(fresh(), MessageSchema.cases.FailedAcceptPrompt.make({ error: "x" }))
+    assertUnchanged(fresh(), MessageSchema.cases.SucceededAcceptPrompt.make({}))
+    assertUnchanged(fresh(), MessageSchema.cases.FailedAcceptPrompt.make({ error: "x" }))
   })
 })
 

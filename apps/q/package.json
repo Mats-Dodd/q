@@ -4,6 +4,12 @@
   "private": true,
   "description": "The q binary. Composition root: the API handlers, the layers that run or reach the server, and the CLI.",
   "type": "module",
+  "exports": {
+    "./api/sessions/sessions-group-layer": "./src/api/sessions/sessions-group-layer.ts",
+    "./commands/chat": "./src/commands/chat.tsx",
+    "./layers/api": "./src/layers/api.ts",
+    "./layers/app": "./src/layers/app.ts"
+  },
   "scripts": {
     "start": "bun src/cli.ts",
     "build": "bun build.ts"

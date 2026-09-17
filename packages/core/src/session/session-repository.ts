@@ -1,6 +1,9 @@
-import { Session, type SessionId } from "@q/domain/session/model"
-import { type Cause, Context, Effect, Layer, Schema } from "effect"
-import { SqlClient, type SqlError, SqlModel, SqlSchema } from "effect/unstable/sql"
+import { Session } from "@q/domain/session/model"
+import type { SessionId } from "@q/domain/session/model"
+import { Context, Effect, Layer, Schema } from "effect"
+import type { Cause } from "effect"
+import { SqlClient, SqlModel, SqlSchema } from "effect/unstable/sql"
+import type { SqlError } from "effect/unstable/sql"
 
 // Rows are this module's own writes. A row that does not decode is a bug, not an error: `SchemaError` dies here.
 

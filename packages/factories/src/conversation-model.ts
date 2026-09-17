@@ -1,4 +1,5 @@
-import { type ChatMessage, type ChatMessagePart, type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
+import { TurnSchema } from "@q/domain/conversation/model"
+import type { ChatMessage, ChatMessagePart, ConversationModel } from "@q/domain/conversation/model"
 import { Option } from "effect"
 
 export const idleModel: ConversationModel = {

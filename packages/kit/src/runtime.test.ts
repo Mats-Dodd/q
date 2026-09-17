@@ -2,7 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { Deferred, Effect, Exit, Fiber, Schedule, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import { Message, type Model, program } from "./counter.fixture"
+import { Message, program } from "./counter.fixture"
+import type { Model } from "./counter.fixture"
 import * as Command from "./command"
 import type { Return } from "./program"
 import * as Runtime from "./runtime"
@@ -151,7 +152,9 @@ describe("runtime", () => {
       const scope = yield* Scope.make()
       const runtime = yield* Runtime.make(program, {
         onModel: (m) => {
-          if (!m.isResetting) completed += 1
+          if (!m.isResetting) {
+            completed += 1
+          }
         },
       }).pipe(Scope.provide(scope))
       runtime.dispatch(Message.cases.ClickedResetAfterDelay.make({ seconds: 5 }))

@@ -9,13 +9,13 @@ import { OpenSessionPayload, OpenSessionResponse, SendIntentPayload } from "./sc
 // same JSON: nothing is lost on the wire. (Compared as JSON text: `-0` is a valid Int that JSON has no
 // spelling for, so the decoded value is compared in its wire form, not by `deepStrictEqual`.)
 
-const roundTrips = <S extends Schema.Codec<unknown, unknown, never, never>>(name: string, schema: S) => {
-  const json = Schema.toCodecJson(schema)
+const roundTrips = (name: string, schema: Schema.Codec<unknown>) => {
+  const wire = Schema.fromJsonString(Schema.toCodecJson(schema))
   it.effect.prop(`${name} round-trips through JSON`, { value: schema }, ({ value }) =>
     Effect.gen(function* () {
-      const wire = JSON.stringify(yield* Schema.encodeEffect(json)(value))
-      const decoded = yield* Schema.decodeEffect(json)(JSON.parse(wire))
-      assert.strictEqual(JSON.stringify(yield* Schema.encodeEffect(json)(decoded)), wire)
+      const text = yield* Schema.encodeEffect(wire)(value)
+      const decoded = yield* Schema.decodeEffect(wire)(text)
+      assert.strictEqual(yield* Schema.encodeEffect(wire)(decoded), text)
     }),
   )
 }

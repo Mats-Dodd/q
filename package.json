@@ -11,13 +11,12 @@
     "build": "bun apps/q/build.ts",
     "test": "bun --bun vitest run",
     "typecheck": "tsc --noEmit",
-    "check": "effect-tsgo diagnostics --project tsconfig.json",
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "knip": "knip",
     "depcruise": "depcruise packages apps --config .dependency-cruiser.cjs",
-    "verify": "bun run typecheck && bun run check && bun run lint && bun run format:check && bun run knip && bun run depcruise && bun run test",
+    "verify": "bun run typecheck && bun run lint && bun run format:check && bun run knip && bun run depcruise && bun run test",
     "prepare": "lefthook install && effect-tsgo patch --typescript --oxlint"
   },
   "devDependencies": {

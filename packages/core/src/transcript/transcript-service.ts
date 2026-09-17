@@ -45,4 +45,4 @@ export class TranscriptService extends Context.Service<TranscriptService, Transc
   static readonly live = TranscriptService.layer.pipe(Layer.provide(TranscriptRepository.layer))
 }
 
-const toPersistenceError = (cause: SqlError.SqlError) => Effect.fail(new PersistenceError({ cause, message: cause.message }))
+const toPersistenceError = (cause: SqlError.SqlError) => Effect.fail(PersistenceError.make({ cause, message: cause.message }))

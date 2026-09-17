@@ -16,6 +16,7 @@
     "strict": true,
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
@@ -24,20 +25,9 @@
     "noPropertyAccessFromIndexSignature": false,
     "plugins": [
       {
+        // Refactors, quickinfo and completions. Diagnostics come from oxlint (`effecttsgo/*`), one path only.
         "name": "@effect/language-service",
-        "ignoreEffectWarningsInTscExitCode": true,
-        "ignoreEffectSuggestionsInTscExitCode": true,
-        "diagnosticSeverity": {
-          "floatingEffect": "error",
-          "missingEffectContext": "error",
-          "missingEffectError": "error",
-          "missingReturnYieldStar": "error",
-          "unnecessaryPipe": "error",
-          "unnecessaryPipeChain": "error",
-          "leakingRequirements": "warning",
-          "strictEffectProvide": "warning",
-          "genericEffectServices": "warning"
-        }
+        "diagnostics": false
       }
     ]
   }

@@ -1,19 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`a tool call is a line of its own; an approval request takes y or n from the keyboard 1`] = `
-" you › build it
- q › ⚙ bash(make) → approve? y / n
-
-
-
- approve bash? y / n · Esc cancels
-╭──────────────────────────────────────╮
-│ Type a message…                      │
-╰──────────────────────────────────────╯
-"
-`;
-
-exports[`a tool call is a line of its own; an approval request takes y or n from the keyboard 2`] = `
+exports[`a tool call is a line of its own; an approval request takes y or n from the keyboard > answered 1`] = `
 " you › build it
  q › ⚙ bash(make) → exit 0
      Done.
@@ -26,7 +13,20 @@ exports[`a tool call is a line of its own; an approval request takes y or n from
 "
 `;
 
-exports[`typing a prompt and pressing Enter echoes it back 1`] = `
+exports[`a tool call is a line of its own; an approval request takes y or n from the keyboard > asked 1`] = `
+" you › build it
+ q › ⚙ bash(make) → approve? y / n
+
+
+
+ approve bash? y / n · Esc cancels
+╭──────────────────────────────────────╮
+│ Type a message…                      │
+╰──────────────────────────────────────╯
+"
+`;
+
+exports[`typing a prompt and pressing Enter echoes it back > echoed 1`] = `
 " you › hello
  q › hello
 

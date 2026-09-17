@@ -1,5 +1,7 @@
-import { Cause, Exit, type Layer, ManagedRuntime, Scope } from "effect"
-import { type Accessor, batch, createMemo, createResource, createSignal, onCleanup } from "solid-js"
+import { Cause, Exit, ManagedRuntime, Scope } from "effect"
+import type { Layer } from "effect"
+import { batch, createMemo, createResource, createSignal, onCleanup } from "solid-js"
+import type { Accessor } from "solid-js"
 
 import type { Program } from "./program"
 import * as Runtime from "./runtime"
@@ -40,21 +42,16 @@ export const createProgram = <Model, Msg, R, E, Flags>(
   const [crash, setCrash] = createSignal<Cause.Cause<unknown>>()
   let setModel: ((model: Model) => void) | undefined
 
-  const [app] = createResource(async (): Promise<SolidProgram<Model, Msg> | undefined> => {
-    const exit = await managed.runPromiseExit(
-      Runtime.make(program, {
-        batch,
-        onModel: (model) => setModel?.(model),
-        onCrash: (cause) => {
-          // console.error is captured by OpenTUI's console overlay, which opens on error.
-          console.error(Cause.pretty(cause))
-          setCrash(() => cause)
-        },
-      }).pipe(Scope.provide(scope)),
-    )
+  // console.error is captured by OpenTUI's console overlay, which opens on error.
+  const report = (cause: Cause.Cause<unknown>) => {
+    // oxlint-disable-next-line effecttsgo/global-console -- see above
+    console.error(Cause.pretty(cause))
+    setCrash(() => cause)
+  }
+
+  const boot = (exit: Exit.Exit<Runtime.Runtime<Model, Msg>, E>): SolidProgram<Model, Msg> | undefined => {
     if (Exit.isFailure(exit)) {
-      console.error(Cause.pretty(exit.cause))
-      setCrash(() => exit.cause)
+      report(exit.cause)
       return undefined
     }
     const runtime = exit.value
@@ -62,10 +59,17 @@ export const createProgram = <Model, Msg, R, E, Flags>(
     setModel = (next) => set(() => next)
     const select = <Value>(project: (model: Model) => Value) => createMemo(() => project(model()))
     return { model, select, dispatch: runtime.dispatch, runtime }
-  })
+  }
+
+  // Solid's resource fetcher is a Promise: this is the one place the Effect world meets Solid's.
+  const [app] = createResource(() =>
+    managed
+      .runPromiseExit(Runtime.make(program, { batch, onModel: (model) => setModel?.(model), onCrash: report }).pipe(Scope.provide(scope)))
+      .then(boot),
+  )
 
   onCleanup(() => {
-    void managed.runPromise(Scope.close(scope, Exit.void)).finally(() => managed.dispose())
+    void managed.runPromise(Scope.close(scope, Exit.void)).then(() => managed.dispose())
   })
 
   return { app, crash }

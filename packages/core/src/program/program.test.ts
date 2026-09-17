@@ -1,23 +1,26 @@
 import { assert, describe, it, layer } from "@effect/vitest"
-import { type ChatChunk, type ChatMessage, type ChatMessagePart, type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
+import { TurnSchema } from "@q/domain/conversation/model"
+import type { ChatChunk, ChatMessage, ChatMessagePart, ConversationModel } from "@q/domain/conversation/model"
 import { PersistenceError } from "@q/domain/persistence-error"
 import { ResumeSchema } from "@q/domain/session/model"
-import { type ConversationEvent, ConversationEventSchema, OutcomeSchema } from "@q/domain/transcript/model"
+import { ConversationEventSchema, OutcomeSchema } from "@q/domain/transcript/model"
+import type { ConversationEvent } from "@q/domain/transcript/model"
 import { makeBashApprovalChunks, makeBashOutputChunk, makeReadCallChunks, makeTextChunks } from "@q/factories/chat-chunk"
 import { textOf } from "@q/factories/conversation-model"
 import { makeSession } from "@q/factories/session"
 import * as Runtime from "@q/kit/runtime"
 import { CryptoLayerTest, DatabaseLayerTest } from "@q/test/db/layer"
-import { advancingUntil, awaiting } from "@q/test/runtime"
+import { advancingUntil, awaiting, providing } from "@q/test/runtime"
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Semaphore, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { isToolUIPart } from "effect-ai-ui/UIMessage"
 
-import { AgentError, AgentService } from "../agent/agent-service"
-import { CurrentSession } from "../session/current-session"
-import { SessionService } from "../session/session-service"
-import { TranscriptService } from "../transcript/transcript-service"
-import { type Message, MessageSchema } from "./message"
+import { AgentError, AgentService } from "@q/core/agent/agent-service"
+import { CurrentSession } from "@q/core/session/current-session"
+import { SessionService } from "@q/core/session/session-service"
+import { TranscriptService } from "@q/core/transcript/transcript-service"
+import { MessageSchema } from "./message"
+import type { Message } from "./message"
 import { program } from "./program"
 import { coalesce } from "./subscription"
 import { init } from "./update"
@@ -109,7 +112,7 @@ layer(Shared)("program", (it) => {
         { type: "text-delta", id: "t", delta: "ef" },
         { type: "text-end", id: "t" },
       ]
-      const runtime = yield* Runtime.make(program).pipe(Effect.provide(AgentService.layerScripted([burst])))
+      const runtime = yield* Runtime.make(program).pipe(providing(AgentService.layerScripted([burst])))
       const log = yield* Effect.forkChild(Stream.runCollect(Stream.takeUntil(runtime.messages, committed("1"))), {
         startImmediately: true,
       })
@@ -190,17 +193,16 @@ layer(Shared)("program", (it) => {
 
       assert.deepStrictEqual(runtime.model().turn, TurnSchema.cases.Idle.make({}))
       assert.strictEqual(assistantText(runtime), "A README.")
-      const parts = runtime.model().messages[1]!.parts
       assert.deepStrictEqual(
-        parts.map((p) => p.type),
+        runtime.model().messages[1]?.parts.map((p) => p.type),
         ["step-start", "tool-read", "step-start", "text"],
       )
 
       // Round 1 was called with the tool result already in the message.
       const calls = yield* Ref.get(seen)
       assert.strictEqual(calls.length, 2)
-      assert.deepStrictEqual(calls[0]![1]!.parts, [])
-      const read = calls[1]![1]!.parts[1]
+      assert.deepStrictEqual(calls[0]?.[1]?.parts, [])
+      const read = calls[1]?.[1]?.parts[1]
       assert.isTrue(read !== undefined && isToolUIPart(read) && read.state === "output-available")
 
       assert.deepStrictEqual(
@@ -237,7 +239,7 @@ layer(Shared)("program", (it) => {
 
       assert.deepStrictEqual(restored.model().turn, TurnSchema.cases.Idle.make({}))
       assert.strictEqual(assistantText(restored), "Done.")
-      const bash = restored.model().messages[1]!.parts[1]
+      const bash = restored.model().messages[1]?.parts[1]
       assert.isTrue(bash !== undefined && isToolUIPart(bash) && bash.type === "tool-bash" && bash.state === "output-available")
       assert.deepStrictEqual(
         (yield* loadTranscript).map((e) => e._tag),
@@ -256,10 +258,10 @@ layer(Shared)("program", (it) => {
               { type: "start-step" },
               { type: "text-start", id: "t" },
               { type: "text-delta", id: "t", delta: "o" },
-            ).pipe(Stream.concat(Stream.fail(new AgentError({ message: "offline" })))),
+            ).pipe(Stream.concat(Stream.fail(AgentError.make({ message: "offline" })))),
         }),
       )
-      const runtime = yield* Runtime.make(program).pipe(Effect.provide(failing))
+      const runtime = yield* Runtime.make(program).pipe(providing(failing))
       const commit = yield* awaiting(runtime, committed("1"))
 
       runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "hi" }))
@@ -286,7 +288,7 @@ layer(Shared)("program", (it) => {
           step: () => Stream.make<ReadonlyArray<ChatChunk>>({ type: "start-step" }).pipe(Stream.concat(Stream.die(new Error("boom")))),
         }),
       )
-      const runtime = yield* Runtime.make(program).pipe(Effect.provide(dying))
+      const runtime = yield* Runtime.make(program).pipe(providing(dying))
       const commit = yield* awaiting(runtime, committed("1"))
 
       runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "hi" }))
@@ -304,11 +306,11 @@ layer(Shared)("program", (it) => {
       const readOnly = Layer.succeed(
         TranscriptService,
         TranscriptService.of({
-          append: () => Effect.fail(new PersistenceError({ message: "read only" })),
+          append: () => Effect.fail(PersistenceError.make({ message: "read only" })),
           load: () => Effect.succeed([]),
         }),
       )
-      const runtime = yield* Runtime.make(program).pipe(Effect.provide(readOnly), Effect.provideService(CurrentSession, makeSession()))
+      const runtime = yield* Runtime.make(program).pipe(providing(readOnly), Effect.provideService(CurrentSession, makeSession()))
       const refused = yield* awaiting(runtime, (m) => m._tag === "FailedAcceptPrompt")
 
       runtime.dispatch(MessageSchema.cases.SubmittedPrompt.make({ text: "hi" }))
@@ -341,7 +343,7 @@ layer(Shared)("program", (it) => {
       const open = Effect.flatMap(Ref.get(gate), (d) => Deferred.succeed(d, undefined))
       const close = Effect.flatMap(Deferred.make<void>(), (d) => Ref.set(gate, d))
 
-      const runtime = yield* Runtime.make(program).pipe(Effect.provide(gated), Effect.provideService(CurrentSession, makeSession()))
+      const runtime = yield* Runtime.make(program).pipe(providing(gated), Effect.provideService(CurrentSession, makeSession()))
       const accept = yield* awaiting(runtime, accepted)
       const abc = yield* awaiting(runtime, received)
       const ended = yield* awaiting(runtime, finished("1"))

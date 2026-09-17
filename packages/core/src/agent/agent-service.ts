@@ -2,7 +2,8 @@ import { AnthropicClient, AnthropicLanguageModel } from "@effect/ai-anthropic"
 import { AgentConfig } from "@q/config/agent-config"
 import { AgentToolkit } from "@q/domain/agent/tools"
 import type { ChatChunk, ChatMessage } from "@q/domain/conversation/model"
-import { Config, Context, type Duration, Effect, type FileSystem, Layer, type Path, Ref, Schedule, Schema, Stream } from "effect"
+import { Config, Context, Effect, Layer, Ref, Schedule, Schema, Stream } from "effect"
+import type { Duration, FileSystem, Path } from "effect"
 import { LanguageModel, Prompt } from "effect/unstable/ai"
 import type { HttpClient } from "effect/unstable/http"
 import type { ChildProcessSpawner } from "effect/unstable/process"
@@ -69,8 +70,8 @@ export class AgentService extends Context.Service<AgentService, AgentServiceInte
               const handlers = yield* Effect.provideContext(toolHandlers(cwd), platform)
               const toolkit = yield* Effect.provideContext(AgentToolkit, handlers)
               return model.streamText({ prompt: Prompt.setSystem(convertToModelMessages(messages), system(cwd)), toolkit }).pipe(
-                toUIMessageStream(AgentToolkit, { onError: (error) => String(error) }),
-                Stream.mapError((error) => new AgentError({ message: error.message })),
+                toUIMessageStream(AgentToolkit, { onError: String }),
+                Stream.mapError((error) => AgentError.make({ message: error.message })),
               )
             }),
           ),
@@ -78,8 +79,8 @@ export class AgentService extends Context.Service<AgentService, AgentServiceInte
     }),
   )
 
-  /** Echoes the last prompt back one character at a time, `delay` apart. Pass `null` for an instant echo. */
-  static readonly layerEcho = (delay: Duration.Input | null): Layer.Layer<AgentService> =>
+  /** Echoes the last prompt back one character at a time, `delay` apart. Omit `delay` for an instant echo. */
+  static readonly layerEcho = (delay?: Duration.Input): Layer.Layer<AgentService> =>
     Layer.succeed(
       AgentService,
       AgentService.of({
@@ -88,7 +89,7 @@ export class AgentService extends Context.Service<AgentService, AgentServiceInte
           const chars = Stream.fromIterable(lastUserText(messages)).pipe(
             Stream.map((delta): ChatChunk => ({ type: "text-delta", id, delta })),
           )
-          const paced = delay === null ? chars : chars.pipe(Stream.schedule(Schedule.spaced(delay)))
+          const paced = delay === undefined ? chars : chars.pipe(Stream.schedule(Schedule.spaced(delay)))
           return step(
             Stream.succeed<ChatChunk>({ type: "text-start", id }).pipe(
               Stream.concat(paced),
@@ -115,7 +116,7 @@ export class AgentService extends Context.Service<AgentService, AgentServiceInte
                 Ref.getAndUpdate(calls, (n) => n + 1),
                 (n) => {
                   const scripted = steps[n] ?? []
-                  return step(scripted instanceof AgentError ? Stream.fail(scripted) : Stream.fromIterable(scripted))
+                  return step(Schema.is(AgentError)(scripted) ? Stream.fail(scripted) : Stream.fromIterable(scripted))
                 },
               ),
             ),
@@ -135,10 +136,12 @@ export class AgentService extends Context.Service<AgentService, AgentServiceInte
   static readonly live: Layer.Layer<AgentService, Config.ConfigError, AgentConfig | HttpClient.HttpClient | Platform> = Layer.unwrap(
     Effect.map(AgentConfig, (config) => {
       switch (config.provider) {
-        case "echo":
+        case "echo": {
           return AgentService.layerEcho(config.echoDelay)
-        case "anthropic":
+        }
+        case "anthropic": {
           return AgentService.layerAnthropic(config.anthropicModel)
+        }
       }
     }),
   )

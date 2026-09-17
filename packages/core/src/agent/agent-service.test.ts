@@ -1,24 +1,32 @@
 import { BunServices } from "@effect/platform-bun"
 import { assert, it } from "@effect/vitest"
 import { makeUserMessage } from "@q/factories/conversation-model"
-import { ConfigProvider, Context, Effect, Layer, Ref, Stream } from "effect"
-import { HttpClient, HttpClientResponse, type HttpClientRequest } from "effect/unstable/http"
+import { ConfigProvider, Context, Effect, Layer, Ref, Schema, Stream } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+import type { HttpClientRequest } from "effect/unstable/http"
 
 import { AgentService } from "./agent-service"
 
 // The Anthropic Layer against a recording HTTP client: what leaves the process, not what the model says.
 
+/** The parts of a request body the assertions look at. */
+const RequestBody = Schema.fromJsonString(
+  Schema.Struct({
+    system: Schema.optional(Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }))),
+    tools: Schema.optional(Schema.Array(Schema.Struct({ name: Schema.String }))),
+  }),
+)
+
 /** The JSON a request carries, for assertions on what the provider was told. */
-const bodyOf = (
-  request: HttpClientRequest.HttpClientRequest,
-): { system?: ReadonlyArray<{ type: "text"; text: string }>; tools?: ReadonlyArray<{ name: string }> } => {
-  assert.strictEqual(request.body._tag, "Uint8Array")
-  return JSON.parse(new TextDecoder().decode((request.body as { body: Uint8Array }).body))
-}
+const bodyOf = (request: HttpClientRequest.HttpClientRequest) =>
+  request.body._tag === "Uint8Array"
+    ? Schema.decodeEffect(RequestBody)(new TextDecoder().decode(request.body.body))
+    : assert.fail(`expected a Uint8Array body, got ${request.body._tag}`)
 
 const sse = (events: ReadonlyArray<readonly [string, unknown]>) =>
   events.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join("")
 
+/* oxlint-disable unicorn/no-null -- the Anthropic wire format has null fields */
 const usage = {
   cache_creation: null,
   cache_creation_input_tokens: null,
@@ -52,6 +60,7 @@ const textTurn = sse([
   ],
   ["message_stop", { type: "message_stop" }],
 ])
+/* oxlint-enable unicorn/no-null */
 
 it.effect("the Anthropic layer sends the key from ANTHROPIC_API_KEY, the four tools and the working directory, and reads the stream", () =>
   Effect.gen(function* () {
@@ -79,7 +88,7 @@ it.effect("the Anthropic layer sends the key from ANTHROPIC_API_KEY, the four to
     assert.isDefined(request)
     assert.strictEqual(request.headers["x-api-key"], "sk-test")
     assert.strictEqual(request.url, "https://api.anthropic.com/v1/messages")
-    const body = bodyOf(request)
+    const body = yield* bodyOf(request)
     assert.deepStrictEqual(
       body.tools?.map((tool) => tool.name),
       ["read", "write", "edit", "bash"],

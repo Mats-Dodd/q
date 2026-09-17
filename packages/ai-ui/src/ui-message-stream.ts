@@ -1,5 +1,6 @@
 import { Encoding, Filter, Option, Predicate, Result, Schema, Stream } from "effect"
-import { Tool, type Response, type Toolkit } from "effect/unstable/ai"
+import { Tool } from "effect/unstable/ai"
+import type { Response, Toolkit } from "effect/unstable/ai"
 
 import type { ProviderMetadata, ToolsOf } from "./ui-message"
 import type { UIMessageChunk } from "./ui-message-chunk"
@@ -43,16 +44,22 @@ const executed = (value: boolean | undefined): { readonly providerExecuted?: boo
 
 const isDenied = (result: unknown): boolean => Predicate.hasProperty(result, "type") && result.type === "execution-denied"
 
+/** The lib types say `string`; `JSON.stringify(undefined)` is `undefined` at runtime. */
+const stringify = (value: unknown): string | undefined => JSON.stringify(value)
+
 /**
  * One line for a failed tool result: its `message` if it has one, the string itself, or its JSON.
  *
  * @since 0.1.0
  */
 export const describeFailure = (result: unknown): string => {
-  if (typeof result === "string") return result
-  if (Predicate.hasProperty(result, "message") && typeof result.message === "string") return result.message
-  const json = JSON.stringify(result)
-  return json === undefined ? String(result) : json
+  if (typeof result === "string") {
+    return result
+  }
+  if (Predicate.hasProperty(result, "message") && typeof result.message === "string") {
+    return result.message
+  }
+  return stringify(result) ?? String(result)
 }
 
 const toFinishReason = (reason: Response.FinishReason) => (reason === "pause" || reason === "unknown" ? "other" : reason)
@@ -69,7 +76,9 @@ export const toUIMessageChunk = <T extends Toolkit.Any>(toolkit: T, options: ToU
   const validators = new Map<string, (input: unknown) => Result.Result<unknown, Schema.SchemaError>>()
   const validate = (name: string, input: unknown): Result.Result<unknown, Schema.SchemaError> | undefined => {
     const tool = toolkit.tools[name]
-    if (tool === undefined || Tool.isDynamic(tool)) return undefined
+    if (tool === undefined || Tool.isDynamic(tool)) {
+      return undefined
+    }
     let validator = validators.get(name)
     if (validator === undefined) {
       validator = Schema.decodeUnknownResult(Schema.toEncoded(tool.parametersSchema))
@@ -85,19 +94,25 @@ export const toUIMessageChunk = <T extends Toolkit.Any>(toolkit: T, options: ToU
 
   const convert = (part: AnyStreamPart): UIMessageChunk<Record<string, Tool.Any>> | undefined => {
     switch (part.type) {
-      case "text-start":
+      case "text-start": {
         return { type: "text-start", id: part.id, ...metadata(part.metadata) }
-      case "text-delta":
+      }
+      case "text-delta": {
         return { type: "text-delta", id: part.id, delta: part.delta, ...metadata(part.metadata) }
-      case "text-end":
+      }
+      case "text-end": {
         return { type: "text-end", id: part.id, ...metadata(part.metadata) }
-      case "reasoning-start":
+      }
+      case "reasoning-start": {
         return sendReasoning ? { type: "reasoning-start", id: part.id, ...metadata(part.metadata) } : undefined
-      case "reasoning-delta":
+      }
+      case "reasoning-delta": {
         return sendReasoning ? { type: "reasoning-delta", id: part.id, delta: part.delta, ...metadata(part.metadata) } : undefined
-      case "reasoning-end":
+      }
+      case "reasoning-end": {
         return sendReasoning ? { type: "reasoning-end", id: part.id, ...metadata(part.metadata) } : undefined
-      case "tool-params-start":
+      }
+      case "tool-params-start": {
         return {
           type: "tool-input-start",
           toolCallId: part.id,
@@ -106,20 +121,27 @@ export const toUIMessageChunk = <T extends Toolkit.Any>(toolkit: T, options: ToU
           ...dynamic(part.name),
           ...metadata(part.metadata),
         }
-      case "tool-params-delta":
+      }
+      case "tool-params-delta": {
         return { type: "tool-input-delta", toolCallId: part.id, inputTextDelta: part.delta }
-      case "tool-params-end":
+      }
+      case "tool-params-end": {
         return undefined
+      }
       case "tool-call": {
         const base = { toolCallId: part.id, toolName: part.name, ...executed(part.providerExecuted), ...metadata(part.metadata) }
         const checked = validate(part.name, part.params)
-        if (checked === undefined) return { type: "tool-input-available", ...base, dynamic: true, input: part.params }
+        if (checked === undefined) {
+          return { type: "tool-input-available", ...base, dynamic: true, input: part.params }
+        }
         return Result.isSuccess(checked)
           ? { type: "tool-input-available", ...base, input: part.params }
           : { type: "tool-input-error", ...base, input: part.params, errorText: checked.failure.message }
       }
       case "tool-result": {
-        if (part.preliminary === true && part.isFailure) return undefined
+        if (part.preliminary && part.isFailure) {
+          return undefined
+        }
         const base = { toolCallId: part.id, ...executed(part.providerExecuted), ...dynamic(part.name), ...metadata(part.metadata) }
         if (part.isFailure) {
           return isDenied(part.encodedResult)
@@ -128,17 +150,21 @@ export const toUIMessageChunk = <T extends Toolkit.Any>(toolkit: T, options: ToU
         }
         return { type: "tool-output-available", ...base, output: part.encodedResult, ...(part.preliminary ? { preliminary: true } : {}) }
       }
-      case "tool-approval-request":
+      case "tool-approval-request": {
         return { type: "tool-approval-request", approvalId: part.approvalId, toolCallId: part.toolCallId }
-      case "file":
+      }
+      case "file": {
         return {
           type: "file",
           mediaType: part.mediaType,
           url: `data:${part.mediaType};base64,${Encoding.encodeBase64(part.data)}`,
           ...metadata(part.metadata),
         }
-      case "source":
-        if (!sendSources) return undefined
+      }
+      case "source": {
+        if (!sendSources) {
+          return undefined
+        }
         return part.sourceType === "url"
           ? { type: "source-url", sourceId: part.id, url: part.url.toString(), title: part.title, ...metadata(part.metadata) }
           : {
@@ -146,20 +172,25 @@ export const toUIMessageChunk = <T extends Toolkit.Any>(toolkit: T, options: ToU
               sourceId: part.id,
               mediaType: part.mediaType,
               title: part.title,
-              ...(part.fileName !== undefined ? { filename: part.fileName } : {}),
+              ...(part.fileName === undefined ? {} : { filename: part.fileName }),
               ...metadata(part.metadata),
             }
-      case "response-metadata":
+      }
+      case "response-metadata": {
         return undefined
-      case "finish":
+      }
+      case "finish": {
         return undefined
-      case "error":
+      }
+      case "error": {
         return { type: "error", errorText: onError(part.error) }
+      }
     }
   }
 
   return (part: AnyStreamPart): Option.Option<UIMessageChunk<ToolsOf<T>>> => {
     const chunk = convert(part)
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- convert is written once over erased Tools
     return chunk === undefined ? Option.none() : Option.some(chunk as UIMessageChunk<ToolsOf<T>>)
   }
 }

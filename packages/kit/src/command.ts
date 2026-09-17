@@ -19,7 +19,13 @@ export type Definition<Name extends string, A extends Args, Msg, R> = {
 } & (keyof A extends never ? () => Command<Msg, R> : (args: A) => Command<Msg, R>)
 
 const named = <Name extends string, A extends Args, Msg, R>(name: Name, make: (args?: A) => Command<Msg, R>): Definition<Name, A, Msg, R> =>
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- `defineProperty` returns the same function; only `name` changed
   Object.defineProperty(make, "name", { value: name }) as unknown as Definition<Name, A, Msg, R>
+
+/** A `Definition` with no arguments is called with none; `{}` is then the only value `A` can be. */
+const argsOf = <A extends Args>(args: A | undefined): A =>
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see above
+  args ?? ({} as A)
 
 /**
  * Define a named Command that produces one Message. `execute` is wrapped in `Effect.suspend`, so
@@ -35,7 +41,7 @@ export const define = <const Name extends string, A extends Args, Msg, R = never
   named(name, (args?: A) => ({
     name,
     args,
-    stream: Stream.fromEffect(Effect.suspend(() => execute((args ?? {}) as A))),
+    stream: Stream.fromEffect(Effect.suspend(() => execute(argsOf(args)))),
   }))
 
 /**
@@ -50,7 +56,7 @@ export const defineStream = <const Name extends string, A extends Args, Msg, R =
   named(name, (args?: A) => ({
     name,
     args,
-    stream: Stream.suspend(() => execute((args ?? {}) as A)),
+    stream: Stream.suspend(() => execute(argsOf(args))),
   }))
 
 /** Lift a Command's Messages into another Message type (used when composing child programs). */

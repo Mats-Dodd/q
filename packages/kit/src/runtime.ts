@@ -52,6 +52,7 @@ export const make = <Model, Msg, R, Flags>(
     // The command channel. Failing it is the crash signal: every failure path ends here.
     const commands = yield* Queue.unbounded<Command<Msg, R>, unknown>()
     const batch = options.batch ?? ((run) => run())
+    // oxlint-disable-next-line effecttsgo/global-console -- the runtime reports a crash after the Effect world is gone; the TUI overrides this
     const report = options.onCrash ?? ((cause) => console.error(Cause.pretty(cause)))
 
     const flags = yield* program.flags
@@ -71,7 +72,9 @@ export const make = <Model, Msg, R, Flags>(
 
     /** Idempotent: the first crash wins, later ones are ignored. Reports here; the runner closes `inner`. */
     const crash = (cause: Cause.Cause<unknown>) => {
-      if (crashed) return
+      if (crashed) {
+        return
+      }
       crashed = true
       pending.length = 0
       report(cause)
@@ -84,9 +87,13 @@ export const make = <Model, Msg, R, Flags>(
       const next = program.update(model, message)
       const changed = next.model !== model
       model = next.model
-      for (const command of next.commands ?? []) Queue.offerUnsafe(commands, command)
+      for (const command of next.commands ?? []) {
+        Queue.offerUnsafe(commands, command)
+      }
       outbox.push({ message, model: changed ? model : undefined })
-      if (changed) options.onModel?.(model)
+      if (changed) {
+        options.onModel?.(model)
+      }
     }
 
     /**
@@ -97,13 +104,17 @@ export const make = <Model, Msg, R, Flags>(
     const outbox: Array<{ readonly message: Msg; readonly model: Model | undefined }> = []
     let publishing = false
     const publish = () => {
-      if (publishing) return
+      if (publishing) {
+        return
+      }
       publishing = true
       try {
-        while (outbox.length > 0) {
-          const { message, model } = outbox.shift()!
+        for (let next = outbox.shift(); next !== undefined; next = outbox.shift()) {
+          const { message, model } = next
           PubSub.publishUnsafe(log, message)
-          if (model !== undefined) PubSub.publishUnsafe(models, model)
+          if (model !== undefined) {
+            PubSub.publishUnsafe(models, model)
+          }
         }
       } finally {
         publishing = false
@@ -117,7 +128,9 @@ export const make = <Model, Msg, R, Flags>(
         // after the inner loop exits, so loop again until it is empty.
         while (pending.length > 0) {
           batch(() => {
-            while (pending.length > 0) step(pending.shift()!)
+            for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
+              step(next)
+            }
           })
         }
       } catch (error) {
@@ -129,9 +142,13 @@ export const make = <Model, Msg, R, Flags>(
     }
 
     const dispatch = (message: Msg) => {
-      if (disposed || crashed) return
+      if (disposed || crashed) {
+        return
+      }
       pending.push(message)
-      if (!draining) drain()
+      if (!draining) {
+        drain()
+      }
     }
 
     const runCommand = (command: Command<Msg, R>) =>
@@ -172,7 +189,9 @@ export const make = <Model, Msg, R, Flags>(
       )
     }
 
-    for (const command of initial.commands ?? []) Queue.offerUnsafe(commands, command)
+    for (const command of initial.commands ?? []) {
+      Queue.offerUnsafe(commands, command)
+    }
 
     // Subscribe first, read second: a change between the two is delivered twice, never dropped.
     const follow = Stream.unwrap(

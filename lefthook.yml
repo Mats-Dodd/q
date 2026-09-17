@@ -13,4 +13,4 @@ pre-commit:
 pre-push:
   commands:
     verify:
-      run: bun run typecheck && bun run check && bun run knip && bun run depcruise && bun run test
+      run: bun run verify

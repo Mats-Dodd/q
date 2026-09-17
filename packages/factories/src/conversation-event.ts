@@ -1,5 +1,6 @@
 import type { ChatMessagePart } from "@q/domain/conversation/model"
-import { type ConversationEvent, ConversationEventSchema, type Outcome, OutcomeSchema } from "@q/domain/transcript/model"
+import { ConversationEventSchema, OutcomeSchema } from "@q/domain/transcript/model"
+import type { ConversationEvent, Outcome } from "@q/domain/transcript/model"
 
 import { makeTextStep } from "./conversation-model"
 

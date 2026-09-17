@@ -1,6 +1,7 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { DatabaseConfig } from "@q/config/database-config"
-import { Effect, FileSystem, Layer, Path, type PlatformError, String } from "effect"
+import { Effect, FileSystem, Layer, Path, String } from "effect"
+import type { PlatformError } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 
 import { runMigrations } from "./migrations"
@@ -13,7 +14,7 @@ import { runMigrations } from "./migrations"
  * because `bun:sqlite` blocks the event loop while it waits; a timeout surfaces as an error,
  * not a hang.
  */
-export const makeSqliteClientLayer = (filename: string): Layer.Layer<SqlClient.SqlClient, never> =>
+export const makeSqliteClientLayer = (filename: string): Layer.Layer<SqlClient.SqlClient> =>
   SqliteClient.layer({
     filename,
     busyTimeout: "1 second",

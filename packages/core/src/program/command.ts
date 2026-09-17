@@ -1,10 +1,11 @@
 import type { ChatMessagePart } from "@q/domain/conversation/model"
-import { type ConversationEvent, ConversationEventSchema, type Outcome } from "@q/domain/transcript/model"
+import { ConversationEventSchema } from "@q/domain/transcript/model"
+import type { ConversationEvent, Outcome } from "@q/domain/transcript/model"
 import * as Command from "@q/kit/command"
 import { Effect } from "effect"
 
-import { CurrentSession } from "../session/current-session"
-import { TranscriptService } from "../transcript/transcript-service"
+import { CurrentSession } from "@q/core/session/current-session"
+import { TranscriptService } from "@q/core/transcript/transcript-service"
 import { MessageSchema } from "./message"
 
 // COMMAND — one-shot effects, described in `update`, run by the runtime. Failures become Messages.

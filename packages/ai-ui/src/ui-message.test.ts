@@ -30,7 +30,9 @@ describe("tool parts", () => {
         const temperature: number = part.output.temperatureC
         assert.deepStrictEqual([city, temperature], ["Oslo", 3])
       }
-      if (isToolUIPart(part)) assert.strictEqual(getToolName(part), "get_weather")
+      if (isToolUIPart(part)) {
+        assert.strictEqual(getToolName(part), "get_weather")
+      }
     }),
   )
 
@@ -82,7 +84,7 @@ describe("chunks", () => {
         toolName: "echo",
         input: { text: "x" },
       })
-      if (input.type === "tool-input-available" && !input.dynamic && input.toolName === "echo") {
+      if (input.type === "tool-input-available" && input.dynamic !== true && input.toolName === "echo") {
         const text: string = input.input.text
         assert.strictEqual(text, "x")
       }
@@ -106,13 +108,13 @@ describe("chunks", () => {
   )
 })
 
-const roundTrips = <S extends Schema.Codec<unknown, unknown, never, never>>(name: string, schema: S) => {
-  const json = Schema.toCodecJson(schema)
+const roundTrips = (name: string, schema: Schema.Codec<unknown>) => {
+  const wire = Schema.fromJsonString(Schema.toCodecJson(schema))
   it.effect.prop(`${name} round-trips through JSON`, { value: schema }, ({ value }) =>
     Effect.gen(function* () {
-      const wire = JSON.stringify(yield* Schema.encodeEffect(json)(value))
-      const decoded = yield* Schema.decodeEffect(json)(JSON.parse(wire))
-      assert.strictEqual(JSON.stringify(yield* Schema.encodeEffect(json)(decoded)), wire)
+      const text = yield* Schema.encodeEffect(wire)(value)
+      const decoded = yield* Schema.decodeEffect(wire)(text)
+      assert.strictEqual(yield* Schema.encodeEffect(wire)(decoded), text)
     }),
   )
 }

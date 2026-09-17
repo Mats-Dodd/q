@@ -1,22 +1,19 @@
 import type { AgentTools } from "@q/domain/agent/tools"
-import {
-  type ChatChunk,
-  type ChatMessage,
-  type ChatMessagePart,
-  type ConversationModel,
-  type Turn,
-  TurnSchema,
-} from "@q/domain/conversation/model"
-import { type ConversationEvent, ConversationEventSchema, type Outcome, OutcomeSchema } from "@q/domain/transcript/model"
+import { TurnSchema } from "@q/domain/conversation/model"
+import type { ChatChunk, ChatMessage, ChatMessagePart, ConversationModel, Turn } from "@q/domain/conversation/model"
+import { ConversationEventSchema, OutcomeSchema } from "@q/domain/transcript/model"
+import type { ConversationEvent, Outcome } from "@q/domain/transcript/model"
 import type * as Program from "@q/kit/program"
 import { Array, Option, Result, Struct } from "effect"
-import { type AnyToolUIPart, isToolUIPart } from "effect-ai-ui/UIMessage"
+import { isToolUIPart } from "effect-ai-ui/UIMessage"
+import type { AnyToolUIPart } from "effect-ai-ui/UIMessage"
 import { applyChunk, emptyAssistant, finalize } from "effect-ai-ui/UIMessageReducer"
 
-import type { CurrentSession } from "../session/current-session"
-import type { TranscriptService } from "../transcript/transcript-service"
+import type { CurrentSession } from "@q/core/session/current-session"
+import type { TranscriptService } from "@q/core/transcript/transcript-service"
 import { AcceptPrompt, CommitStep, CommitTurn } from "./command"
-import { type Message, MessageSchema } from "./message"
+import { MessageSchema } from "./message"
+import type { Message } from "./message"
 
 type Return = Program.Return<ConversationModel, Message, CurrentSession | TranscriptService>
 
@@ -116,9 +113,13 @@ type StepVerdict = { readonly _tag: "AwaitApproval" } | { readonly _tag: "Contin
  */
 const verdict = (parts: ReadonlyArray<ChatMessagePart>): StepVerdict => {
   const tools = toolParts(parts)
-  if (tools.some(isPendingApproval)) return { _tag: "AwaitApproval" }
+  if (tools.some(isPendingApproval)) {
+    return { _tag: "AwaitApproval" }
+  }
   const client = tools.filter((part) => part.providerExecuted !== true)
-  if (client.length > 0 && client.every(isResolvedHere)) return { _tag: "Continue" }
+  if (client.length > 0 && client.every(isResolvedHere)) {
+    return { _tag: "Continue" }
+  }
   return { _tag: "Done" }
 }
 
@@ -143,7 +144,9 @@ const commit = (model: ConversationModel, messageId: string, outcome: Outcome): 
 const finishStep = (model: ConversationModel, messageId: string, round: number): Return => {
   const { parts } = messageOf(model, messageId)
   const next = verdict(lastStep(parts))
-  if (next._tag === "Done") return commit(model, messageId, OutcomeSchema.cases.Completed.make({}))
+  if (next._tag === "Done") {
+    return commit(model, messageId, OutcomeSchema.cases.Completed.make({}))
+  }
   return {
     model: setTurn(model, afterStep(messageId, round, parts)),
     commands: [CommitStep({ messageId, round, parts })],
@@ -153,14 +156,16 @@ const finishStep = (model: ConversationModel, messageId: string, round: number):
 /** Fold one chunk into the assistant message. `error` and a chunk that does not fit end the turn as failed. */
 const receive = (model: ConversationModel, messageId: string, round: number, chunk: ChatChunk): Return => {
   switch (chunk.type) {
-    case "error":
+    case "error": {
       return commit(
         withNotice(model, `agent failed: ${chunk.errorText}`),
         messageId,
         OutcomeSchema.cases.Failed.make({ error: chunk.errorText }),
       )
-    case "finish-step":
+    }
+    case "finish-step": {
       return finishStep(model, messageId, round)
+    }
     default: {
       const applied = applyChunk(messageOf(model, messageId), chunk)
       return Result.match(applied, {
@@ -173,12 +178,21 @@ const receive = (model: ConversationModel, messageId: string, round: number, chu
 }
 
 /** The user answered for `toolCallId`: record it on the part, and run the step that carries the answer to the model. */
-const respond = (model: ConversationModel, messageId: string, round: number, toolCallId: string, approved: boolean): Return => {
+const respond = (
+  model: ConversationModel,
+  { messageId, round }: { readonly messageId: string; readonly round: number },
+  toolCallId: string,
+  approved: boolean,
+): Return => {
   const message = messageOf(model, messageId)
   const part = toolParts(message.parts).find((part) => part.toolCallId === toolCallId)
-  if (part === undefined || part.state !== "approval-requested") return { model }
+  if (part?.state !== "approval-requested") {
+    return { model }
+  }
   const applied = applyChunk(message, { type: "tool-approval-response", approvalId: part.approval.id, approved })
-  if (Result.isFailure(applied)) return { model }
+  if (Result.isFailure(applied)) {
+    return { model }
+  }
   const answered = updateMessage(model, messageId, () => applied.success)
   // Every request answered: on to the step that runs (or refuses) them. Some still open: keep waiting.
   return {
@@ -213,7 +227,7 @@ export const update = (model: ConversationModel, message: Message): Return =>
         ? commit(withNotice(model, `agent failed: ${error}`), messageId, OutcomeSchema.cases.Failed.make({ error }))
         : { model },
     RespondedToolApproval: ({ toolCallId, approved }) =>
-      model.turn._tag === "AwaitingApproval" ? respond(model, model.turn.messageId, model.turn.round, toolCallId, approved) : { model },
+      model.turn._tag === "AwaitingApproval" ? respond(model, model.turn, toolCallId, approved) : { model },
     PressedEscape: () =>
       model.turn._tag === "Streaming" || model.turn._tag === "AwaitingApproval"
         ? commit(model, model.turn.messageId, OutcomeSchema.cases.Cancelled.make({}))

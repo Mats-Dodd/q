@@ -1,7 +1,9 @@
 import { Schema } from "effect"
-import { Tool, type Toolkit } from "effect/unstable/ai"
+import { Tool } from "effect/unstable/ai"
+import type { Toolkit } from "effect/unstable/ai"
 
-import { ProviderMetadata, type ToolsOf } from "./ui-message"
+import { ProviderMetadata } from "./ui-message"
+import type { ToolsOf } from "./ui-message"
 
 /**
  * The AI SDK UI message stream protocol: one JSON object per SSE event. These are the chunks a
@@ -207,7 +209,7 @@ export const AbortChunk = Schema.Struct({ type: Schema.Literal("abort"), reason:
 // -----------------------------------------------------------------------------
 
 /** @since 0.1.0 */
-export type ToolInputAvailableChunk<Name extends string, Input> = {
+export interface ToolInputAvailableChunk<Name extends string, Input> {
   readonly type: "tool-input-available"
   readonly toolCallId: string
   readonly toolName: Name
@@ -226,7 +228,7 @@ export type ToolInputAvailableChunks<Tools extends Record<string, Tool.Any>> = {
 export type ToolOutputs<Tools extends Record<string, Tool.Any>> = { [Name in keyof Tools]: Tool.SuccessEncoded<Tools[Name]> }[keyof Tools]
 
 /** @since 0.1.0 */
-export type ToolOutputAvailableChunk<Output> = {
+export interface ToolOutputAvailableChunk<Output> {
   readonly type: "tool-output-available"
   readonly toolCallId: string
   readonly output: Output
@@ -274,7 +276,7 @@ export const UIMessageChunk = <T extends Toolkit.Any>(toolkit: T): Schema.Codec<
   const tools = Object.values(toolkit.tools).filter((tool) => !Tool.isDynamic(tool))
   const inputs = tools.map((tool) => ToolInputAvailableChunk(tool.name, tool.parametersSchema))
   const outputs = Schema.Union(tools.map((tool) => Schema.toEncoded(tool.successSchema)))
-  return Schema.Union([
+  const schema = Schema.Union([
     TextStartChunk,
     TextDeltaChunk,
     TextEndChunk,
@@ -301,5 +303,7 @@ export const UIMessageChunk = <T extends Toolkit.Any>(toolkit: T): Schema.Codec<
     StartChunk,
     FinishChunk,
     AbortChunk,
-  ]).annotate({ identifier: "UIMessageChunk" }) as any
+  ]).annotate({ identifier: "UIMessageChunk" })
+  // oxlint-disable-next-line typescript/no-explicit-any, typescript/no-unsafe-type-assertion -- the union is built per tool at runtime; its type is the mirror above, as in `Response.StreamPart`
+  return schema as any
 }

@@ -3,14 +3,15 @@ import type { PersistenceError } from "@q/domain/persistence-error"
 import type { SessionNotFoundError } from "@q/domain/session/errors"
 import type { SessionId } from "@q/domain/session/model"
 import * as Runtime from "@q/kit/runtime"
-import { Context, Effect, Layer, RcMap, type Scope } from "effect"
+import { Context, Effect, Layer, RcMap } from "effect"
+import type { Scope } from "effect"
 
-import type { AgentService } from "../agent/agent-service"
-import type { Message } from "../program/message"
-import { program } from "../program/program"
-import { CurrentSession } from "../session/current-session"
-import { SessionService } from "../session/session-service"
-import type { TranscriptService } from "../transcript/transcript-service"
+import type { AgentService } from "@q/core/agent/agent-service"
+import type { Message } from "@q/core/program/message"
+import { program } from "@q/core/program/program"
+import { CurrentSession } from "@q/core/session/current-session"
+import { SessionService } from "@q/core/session/session-service"
+import type { TranscriptService } from "@q/core/transcript/transcript-service"
 
 // SESSION RUNTIME — the live runtimes, one per session, started on first use. A runtime stays up while a
 // request holds it and for `IDLE_TIME_TO_LIVE` after the last one lets go, so a client can come back

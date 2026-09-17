@@ -1,7 +1,8 @@
 import { BunServices } from "@effect/platform-bun"
 import { assert, describe, layer } from "@effect/vitest"
-import { AgentToolkit, type AgentTools } from "@q/domain/agent/tools"
-import { Effect, FileSystem, Path, Stream } from "effect"
+import { AgentToolkit, Bash, Edit, Read, Write } from "@q/domain/agent/tools"
+import type { AgentTools } from "@q/domain/agent/tools"
+import { Effect, FileSystem, Path, Schema, Stream } from "effect"
 import type { Tool } from "effect/unstable/ai"
 
 import { BASH_OUTPUT_LIMIT, BASH_TIMED_OUT_EXIT_CODE, READ_MAX_LINES, toolHandlers } from "./tool-handlers"
@@ -16,7 +17,7 @@ const call = <Name extends keyof AgentTools>(cwd: string, name: Name, params: To
     const results = yield* Stream.runCollect(yield* toolkit.handle(name, params))
     const last = results.at(-1)
     assert.isDefined(last)
-    return { output: last.encodedResult as unknown, isFailure: last.isFailure }
+    return { output: last.encodedResult, isFailure: last.isFailure }
   })
 
 /** A fresh directory with `files` in it, gone when the test's scope closes. */
@@ -33,7 +34,11 @@ const workspace = (files: Record<string, string> = {}) =>
     return { cwd, fs, path, at: (name: string) => path.join(cwd, name) }
   })
 
-const reason = (output: unknown): unknown => (output as { reason: unknown }).reason
+/** The output as the tool's success or failure schema says it is. */
+const decoded = <S extends Schema.Top>(schema: S, output: unknown) => Schema.decodeUnknownEffect(schema)(output)
+
+const reasonOf = <S extends Schema.Top & { readonly Type: { readonly reason: string } }>(schema: S, output: unknown) =>
+  Effect.map(decoded(schema, output), (failure) => failure.reason)
 
 layer(BunServices.layer, { excludeTestServices: true })("tool handlers", (it) => {
   describe("read", () => {
@@ -58,7 +63,7 @@ layer(BunServices.layer, { excludeTestServices: true })("tool handlers", (it) =>
       Effect.gen(function* () {
         const ws = yield* workspace({ "big.txt": Array.from({ length: READ_MAX_LINES + 5 }, (_, i) => `${i}`).join("\n") })
         const { output } = yield* call(ws.cwd, "read", { path: "big.txt" })
-        const { content, totalLines, truncated } = output as { content: string; totalLines: number; truncated: boolean }
+        const { content, totalLines, truncated } = yield* decoded(Read.successSchema, output)
         assert.isTrue(truncated)
         assert.strictEqual(totalLines, READ_MAX_LINES + 5)
         assert.strictEqual(content.split("\n").length - 1, READ_MAX_LINES)
@@ -70,10 +75,10 @@ layer(BunServices.layer, { excludeTestServices: true })("tool handlers", (it) =>
         const ws = yield* workspace({ "dir/x": "" })
         const missing = yield* call(ws.cwd, "read", { path: "nope.txt" })
         assert.isTrue(missing.isFailure)
-        assert.strictEqual(reason(missing.output), "not-found")
+        assert.strictEqual(yield* reasonOf(Read.failureSchema, missing.output), "not-found")
         const dir = yield* call(ws.cwd, "read", { path: "dir" })
         assert.isTrue(dir.isFailure)
-        assert.strictEqual(reason(dir.output), "not-a-file")
+        assert.strictEqual(yield* reasonOf(Read.failureSchema, dir.output), "not-a-file")
       }),
     )
   })
@@ -95,7 +100,7 @@ layer(BunServices.layer, { excludeTestServices: true })("tool handlers", (it) =>
         const ws = yield* workspace({ "dir/x": "" })
         const { output, isFailure } = yield* call(ws.cwd, "write", { path: "dir", content: "x" })
         assert.isTrue(isFailure)
-        assert.strictEqual(reason(output), "is-a-directory")
+        assert.strictEqual(yield* reasonOf(Write.failureSchema, output), "is-a-directory")
       }),
     )
   })
@@ -115,7 +120,7 @@ layer(BunServices.layer, { excludeTestServices: true })("tool handlers", (it) =>
         const ws = yield* workspace({ "a.txt": "x y x y x" })
         const refused = yield* call(ws.cwd, "edit", { path: "a.txt", oldString: "x", newString: "z" })
         assert.isTrue(refused.isFailure)
-        assert.strictEqual(reason(refused.output), "old-string-not-unique")
+        assert.strictEqual(yield* reasonOf(Edit.failureSchema, refused.output), "old-string-not-unique")
         assert.strictEqual(yield* ws.fs.readFileString(ws.at("a.txt")), "x y x y x")
         const all = yield* call(ws.cwd, "edit", { path: "a.txt", oldString: "x", newString: "z", replaceAll: true })
         assert.deepStrictEqual(all.output, { path: ws.at("a.txt"), replacements: 3 })
@@ -127,9 +132,9 @@ layer(BunServices.layer, { excludeTestServices: true })("tool handlers", (it) =>
       Effect.gen(function* () {
         const ws = yield* workspace({ "a.txt": "abc" })
         const absent = yield* call(ws.cwd, "edit", { path: "a.txt", oldString: "zzz", newString: "y" })
-        assert.strictEqual(reason(absent.output), "old-string-not-found")
+        assert.strictEqual(yield* reasonOf(Edit.failureSchema, absent.output), "old-string-not-found")
         const missing = yield* call(ws.cwd, "edit", { path: "nope.txt", oldString: "a", newString: "b" })
-        assert.strictEqual(reason(missing.output), "not-found")
+        assert.strictEqual(yield* reasonOf(Edit.failureSchema, missing.output), "not-found")
       }),
     )
   })
@@ -140,7 +145,7 @@ layer(BunServices.layer, { excludeTestServices: true })("tool handlers", (it) =>
         const ws = yield* workspace()
         const { output, isFailure } = yield* call(ws.cwd, "bash", { command: "pwd; echo out; echo err 1>&2; exit 3" })
         assert.isFalse(isFailure)
-        const result = output as { exitCode: number; output: string; truncated: boolean; timedOut: boolean }
+        const result = yield* decoded(Bash.successSchema, output)
         assert.strictEqual(result.exitCode, 3)
         assert.include(result.output, `${ws.cwd}\n`)
         assert.include(result.output, "out\n")
@@ -162,7 +167,7 @@ layer(BunServices.layer, { excludeTestServices: true })("tool handlers", (it) =>
       Effect.gen(function* () {
         const ws = yield* workspace()
         const { output } = yield* call(ws.cwd, "bash", { command: `yes | head -c ${BASH_OUTPUT_LIMIT * 2}; echo; echo tail` })
-        const result = output as { exitCode: number; output: string; truncated: boolean }
+        const result = yield* decoded(Bash.successSchema, output)
         assert.strictEqual(result.exitCode, 0)
         assert.isTrue(result.truncated)
         assert.strictEqual(result.output.length, BASH_OUTPUT_LIMIT)

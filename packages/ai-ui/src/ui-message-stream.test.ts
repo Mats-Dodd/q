@@ -9,7 +9,9 @@ import { WeatherToolkit } from "./weather.fixture"
 
 const convert = toUIMessageChunk(WeatherToolkit)
 const chunkOf = (part: Parameters<typeof convert>[0]) => Option.getOrThrow(convert(part))
-const none = (part: Parameters<typeof convert>[0]) => assert.isTrue(Option.isNone(convert(part)))
+const assertNone = (part: Parameters<typeof convert>[0]) => assert.isTrue(Option.isNone(convert(part)))
+const errorTextOf = (chunk: ReturnType<typeof chunkOf>): string =>
+  chunk.type === "tool-output-error" ? chunk.errorText : assert.fail(`expected tool-output-error, got ${chunk.type}`)
 
 describe("text and reasoning", () => {
   it("text parts map one to one, and empty metadata is dropped", () => {
@@ -38,7 +40,7 @@ describe("tool calls", () => {
       Response.makePart("tool-call", { id: "c1", name: "get_weather", params: { city: "Oslo" }, providerExecuted: false }),
     )
     assert.deepStrictEqual(chunk, { type: "tool-input-available", toolCallId: "c1", toolName: "get_weather", input: { city: "Oslo" } })
-    if (chunk.type === "tool-input-available" && !chunk.dynamic && chunk.toolName === "get_weather") {
+    if (chunk.type === "tool-input-available" && chunk.dynamic !== true && chunk.toolName === "get_weather") {
       const city: string = chunk.input.city
       assert.strictEqual(city, "Oslo")
     }
@@ -77,7 +79,7 @@ describe("tool calls", () => {
       toolCallId: "c1",
       inputTextDelta: '{"ci',
     })
-    none(Response.makePart("tool-params-end", { id: "c1" }))
+    assertNone(Response.makePart("tool-params-end", { id: "c1" }))
   })
 })
 
@@ -108,7 +110,7 @@ describe("tool results", () => {
       output: { temperatureC: 3, sky: "grey" },
       preliminary: true,
     })
-    none(result(true, { unknownCity: "x" }, true))
+    assertNone(result(true, { unknownCity: "x" }, true))
   })
 
   it("a failure is tool-output-error with a one-line description", () => {
@@ -117,8 +119,8 @@ describe("tool results", () => {
       toolCallId: "c1",
       errorText: '{"unknownCity":"Atlantis"}',
     })
-    assert.strictEqual((chunkOf(result(true, { message: "boom" })) as { errorText: string }).errorText, "boom")
-    assert.strictEqual((chunkOf(result(true, "plain")) as { errorText: string }).errorText, "plain")
+    assert.strictEqual(errorTextOf(chunkOf(result(true, { message: "boom" }))), "boom")
+    assert.strictEqual(errorTextOf(chunkOf(result(true, "plain"))), "plain")
   })
 
   it("a denied execution is tool-output-denied", () => {
@@ -139,8 +141,8 @@ describe("tool results", () => {
 
 describe("everything else", () => {
   it("finish and response-metadata have no chunk", () => {
-    none(Response.makePart("finish", { reason: "stop", usage: new Response.Usage({ inputTokens: {}, outputTokens: {} }) }))
-    none(Response.makePart("response-metadata", { modelId: "m" }))
+    assertNone(Response.makePart("finish", { reason: "stop", usage: Response.Usage.make({ inputTokens: {}, outputTokens: {} }) }))
+    assertNone(Response.makePart("response-metadata", { modelId: "m" }))
   })
 
   it("an error part is an error chunk through onError; the default leaks nothing", () => {
@@ -165,8 +167,9 @@ describe("everything else", () => {
 
   it("sources are off by default and on by option", () => {
     // `makePart("source", ...)` types its params from both source kinds at once, so the url fields need a cast.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see above
     const source = Response.makePart("source", { sourceType: "url", id: "s", url: new URL("https://a.b/"), title: "A" } as never)
-    none(source)
+    assertNone(source)
     assert.deepStrictEqual(Option.getOrThrow(toUIMessageChunk(WeatherToolkit, { sendSources: true })(source)), {
       type: "source-url",
       sourceId: "s",
@@ -182,7 +185,7 @@ it.effect("a stream is one step: start-step, the chunks, finish-step; failures p
       Response.makePart("text-start", { id: "t" }),
       Response.makePart("text-delta", { id: "t", delta: "hi" }),
       Response.makePart("text-end", { id: "t" }),
-      Response.makePart("finish", { reason: "stop", usage: new Response.Usage({ inputTokens: {}, outputTokens: {} }) }),
+      Response.makePart("finish", { reason: "stop", usage: Response.Usage.make({ inputTokens: {}, outputTokens: {} }) }),
     )
     const chunks = yield* Stream.runCollect(toUIMessageStream(WeatherToolkit)(parts))
     assert.deepStrictEqual(

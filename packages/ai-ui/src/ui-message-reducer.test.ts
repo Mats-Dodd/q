@@ -15,10 +15,11 @@ type Message = UIMessage<Tools>
 const fold = (message: Message, chunks: ReadonlyArray<Chunk>): Message =>
   chunks.reduce((m, chunk) => Result.getOrThrow(applyChunk(m, chunk)), message)
 
-const failure = (message: Message, chunk: Chunk) => {
+const assertFailure = (message: Message, chunk: Chunk) => {
   const result = applyChunk(message, chunk)
-  assert.isTrue(Result.isFailure(result))
-  return Result.isFailure(result) ? result.failure : (undefined as never)
+  return Result.isFailure(result)
+    ? result.failure
+    : assert.fail(`expected a UIMessageStreamError, got a message with ${result.success.parts.length} parts`)
 }
 
 const start = emptyAssistant<Tools>("m1")
@@ -48,12 +49,12 @@ describe("text", () => {
   })
 
   it("a delta or end without a start is a UIMessageStreamError", () => {
-    const error = failure(start, { type: "text-delta", id: "t", delta: "x" })
+    const error = assertFailure(start, { type: "text-delta", id: "t", delta: "x" })
     assert.strictEqual(error._tag, "UIMessageStreamError")
     assert.strictEqual(error.chunkType, "text-delta")
     assert.strictEqual(error.chunkId, "t")
-    failure(start, { type: "text-end", id: "t" })
-    failure(start, { type: "reasoning-delta", id: "r", delta: "x" })
+    assertFailure(start, { type: "text-end", id: "t" })
+    assertFailure(start, { type: "reasoning-delta", id: "r", delta: "x" })
   })
 
   it("a delta after the end does not reopen the part", () => {
@@ -61,7 +62,7 @@ describe("text", () => {
       { type: "text-start", id: "t" },
       { type: "text-end", id: "t" },
     ])
-    failure(done, { type: "text-delta", id: "t", delta: "late" })
+    assertFailure(done, { type: "text-delta", id: "t", delta: "late" })
   })
 
   it("chunks that carry no state leave the message unchanged by reference", () => {
@@ -93,8 +94,8 @@ describe("tool calls", () => {
         output: { temperatureC: 3, sky: "grey" },
       },
     ])
-    const part = m.parts[0]!
-    if (part.type === "tool-get_weather" && part.state === "output-available") {
+    const part = m.parts[0]
+    if (part?.type === "tool-get_weather" && part.state === "output-available") {
       const temperature: number = part.output.temperatureC
       assert.strictEqual(temperature, 3)
     }
@@ -135,12 +136,12 @@ describe("tool calls", () => {
   })
 
   it("outputs, deltas and approvals for an unknown call are UIMessageStreamErrors", () => {
-    failure(start, output)
-    failure(start, { type: "tool-output-error", toolCallId: "c1", errorText: "x" })
-    failure(start, { type: "tool-output-denied", toolCallId: "c1" })
-    failure(start, { type: "tool-input-delta", toolCallId: "c1", inputTextDelta: "x" })
-    failure(start, { type: "tool-approval-request", approvalId: "a", toolCallId: "c1" })
-    failure(start, { type: "tool-approval-response", approvalId: "a", approved: true })
+    assertFailure(start, output)
+    assertFailure(start, { type: "tool-output-error", toolCallId: "c1", errorText: "x" })
+    assertFailure(start, { type: "tool-output-denied", toolCallId: "c1" })
+    assertFailure(start, { type: "tool-input-delta", toolCallId: "c1", inputTextDelta: "x" })
+    assertFailure(start, { type: "tool-approval-request", approvalId: "a", toolCallId: "c1" })
+    assertFailure(start, { type: "tool-approval-response", approvalId: "a", approved: true })
   })
 
   it("approval: requested, responded, then the output; a denial ends in output-denied", () => {
@@ -177,7 +178,7 @@ describe("tool calls", () => {
   })
 
   it("an approval request for a part that has no input yet is an error", () => {
-    failure(fold(start, [streaming]), { type: "tool-approval-request", approvalId: "a1", toolCallId: "c1" })
+    assertFailure(fold(start, [streaming]), { type: "tool-approval-request", approvalId: "a1", toolCallId: "c1" })
   })
 })
 
@@ -210,7 +211,7 @@ describe("streams", () => {
     Effect.gen(function* () {
       const messages = yield* Stream.runCollect(readUIMessageStream(Stream.fromIterable(chunks), start))
       assert.strictEqual(messages.length, chunks.length)
-      assert.deepStrictEqual(messages.at(-1)!.parts, [{ type: "step-start" }, { type: "text", id: "t", text: "hi", state: "done" }])
+      assert.deepStrictEqual(messages.at(-1)?.parts, [{ type: "step-start" }, { type: "text", id: "t", text: "hi", state: "done" }])
     }),
   )
 

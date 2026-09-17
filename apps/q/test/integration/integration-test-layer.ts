@@ -9,8 +9,8 @@ import { HttpPlatformLayerTest } from "@q/test/http/platform-layer"
 import { Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 
-import { SessionsGroupLayer } from "../../src/api/sessions/sessions-group-layer"
-import { ApiRoutesLayer } from "../../src/layers/api"
+import { SessionsGroupLayer } from "q/api/sessions/sessions-group-layer"
+import { ApiRoutesLayer } from "q/layers/api"
 
 // The real handlers over the real services on a throwaway database, with the agent the test picks.
 // Production binds `AgentService.live` (from config); here the agent is a parameter.

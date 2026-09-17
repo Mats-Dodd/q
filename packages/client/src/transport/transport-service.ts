@@ -1,4 +1,5 @@
-import { type ConversationModel, type Intent, IntentSchema } from "@q/domain/conversation/model"
+import { IntentSchema } from "@q/domain/conversation/model"
+import type { ConversationModel, Intent } from "@q/domain/conversation/model"
 import type { Resume, SessionId } from "@q/domain/session/model"
 import { Context, Data, Effect, Layer, Stream } from "effect"
 
@@ -13,12 +14,18 @@ export class TransportError extends Data.TaggedError("TransportError")<{ readonl
     const cause = this.cause
     if (typeof cause === "object" && cause !== null && "_tag" in cause) {
       switch (cause._tag) {
-        case "SessionNotFoundError":
+        case "SessionNotFoundError": {
           return "the session is gone"
-        case "PersistenceError":
+        }
+        case "PersistenceError": {
           return `server storage: ${"message" in cause ? String(cause.message) : "failed"}`
-        case "HttpClientError":
+        }
+        case "HttpClientError": {
           return `cannot reach the server: ${"message" in cause ? String(cause.message) : "request failed"}`
+        }
+        default: {
+          break
+        }
       }
     }
     return cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause)
@@ -35,7 +42,7 @@ interface TransportInterface {
 export class Transport extends Context.Service<Transport, TransportInterface>()("@q/client/transport/transport-service/Transport") {
   /** Bind a client to one session. */
   static readonly make = (client: ApiClient["Service"], id: SessionId): TransportInterface => {
-    const stream = (request: Effect.Effect<Stream.Stream<ConversationModel, unknown>, unknown>) =>
+    const stream = <E1, E2>(request: Effect.Effect<Stream.Stream<ConversationModel, E1>, E2>) =>
       Stream.unwrap(request).pipe(Stream.mapError((cause) => new TransportError({ cause })))
     return Transport.of({
       // The generated client takes one request shape per member of the payload union.

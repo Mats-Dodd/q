@@ -9,6 +9,20 @@ module.exports = {
       to: { circular: true },
     },
     {
+      name: "no-barrel-imports",
+      severity: "error",
+      comment: "Modules are imported by path (`@q/core/session/session-service`). There are no index.ts barrels to import.",
+      from: { path: "^(packages|apps)/" },
+      to: { path: "^(packages|apps)/.*/index\\.tsx?$" },
+    },
+    {
+      name: "not-to-unresolvable",
+      severity: "error",
+      comment: "Every import resolves. A `@q/*` path that is missing from the package's `exports` map fails here first.",
+      from: {},
+      to: { couldNotResolve: true },
+    },
+    {
       name: "ai-ui-is-a-library",
       severity: "error",
       comment: "effect-ai-ui is publishable. It imports effect and itself, nothing from the workspace.",

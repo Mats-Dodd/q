@@ -1,6 +1,7 @@
 import { assert, layer } from "@effect/vitest"
 import { AgentService } from "@q/core/agent/agent-service"
-import { type ChatChunk, type ConversationModel, IntentSchema, TurnSchema } from "@q/domain/conversation/model"
+import { IntentSchema, TurnSchema } from "@q/domain/conversation/model"
+import type { ChatChunk, ConversationModel } from "@q/domain/conversation/model"
 import { ResumeSchema } from "@q/domain/session/model"
 import { makeBashApprovalChunks, makeBashOutputChunk, makeTextChunks } from "@q/factories/chat-chunk"
 import { textOf } from "@q/factories/conversation-model"
@@ -15,6 +16,9 @@ import { makeApiClientIntegration } from "./integration-test-layer"
 // delays are tiny and completion is the end of the SSE stream, never a sleep.
 
 const texts = (model: ConversationModel) => model.messages.map(textOf)
+
+/** The last Model a response streamed; an empty response fails the test. */
+const lastOf = <A>(models: ReadonlyArray<A>): A => models.at(-1) ?? assert.fail("the response streamed no Model")
 
 /** An agent that says `first`, then holds until `gate` opens, then says `then`. */
 const heldAgent = (gate: Deferred.Deferred<void>, first: string, then: string) =>
@@ -46,7 +50,7 @@ layer(HttpPlatformLayerTest, { excludeTestServices: true })("sessions API", (it)
       )
       assert.isAtLeast(models.length, 2)
       assert.isTrue(models.slice(0, -1).every((m) => m.turn._tag !== "Idle"))
-      const last = models.at(-1)!
+      const last = lastOf(models)
       assert.deepStrictEqual(last.turn, TurnSchema.cases.Idle.make({}))
       assert.deepStrictEqual(texts(last), ["hello", "hello"])
 
@@ -71,7 +75,7 @@ layer(HttpPlatformLayerTest, { excludeTestServices: true })("sessions API", (it)
 
   it.effect("an unknown session is SessionNotFoundError on every route that names one", () =>
     Effect.gen(function* () {
-      const api = yield* makeApiClientIntegration(AgentService.layerEcho(null))
+      const api = yield* makeApiClientIntegration(AgentService.layerEcho())
       const id = makeSessionId("nope")
       const opened = yield* Effect.flip(
         api.sessions.openSession({ payload: { cwd: "/a", resume: ResumeSchema.cases.Session.make({ id }) } }),
@@ -106,12 +110,12 @@ layer(HttpPlatformLayerTest, { excludeTestServices: true })("sessions API", (it)
         yield* api.sessions.sendIntent({ params: { id: session.id }, payload: IntentSchema.cases.PressedEscape.make({}) }),
       )
       assert.strictEqual(escaped.length, 1)
-      assert.deepStrictEqual(escaped[0]!.turn, TurnSchema.cases.Idle.make({}))
-      assert.deepStrictEqual(texts(escaped[0]!), ["hi", "a"])
+      assert.deepStrictEqual(lastOf(escaped).turn, TurnSchema.cases.Idle.make({}))
+      assert.deepStrictEqual(texts(lastOf(escaped)), ["hi", "a"])
 
       const models = yield* Fiber.join(turn)
-      assert.deepStrictEqual(models.at(-1)!.turn, TurnSchema.cases.Idle.make({}))
-      assert.deepStrictEqual(texts(models.at(-1)!), ["hi", "a"])
+      assert.deepStrictEqual(lastOf(models).turn, TurnSchema.cases.Idle.make({}))
+      assert.deepStrictEqual(texts(lastOf(models)), ["hi", "a"])
     }),
   )
 
@@ -140,8 +144,8 @@ layer(HttpPlatformLayerTest, { excludeTestServices: true })("sessions API", (it)
       yield* Deferred.succeed(gate, undefined)
 
       for (const models of [yield* Fiber.join(first), yield* Fiber.join(second)]) {
-        assert.deepStrictEqual(texts(models.at(-1)!), ["one", "done"])
-        assert.deepStrictEqual(models.at(-1)!.turn, TurnSchema.cases.Idle.make({}))
+        assert.deepStrictEqual(texts(lastOf(models)), ["one", "done"])
+        assert.deepStrictEqual(lastOf(models).turn, TurnSchema.cases.Idle.make({}))
       }
     }),
   )
@@ -162,9 +166,9 @@ layer(HttpPlatformLayerTest, { excludeTestServices: true })("sessions API", (it)
           payload: IntentSchema.cases.SubmittedPrompt.make({ text: "build it" }),
         }),
       )
-      assert.deepStrictEqual(parked.at(-1)!.turn, TurnSchema.cases.AwaitingApproval.make({ messageId: "1", round: 0 }))
+      assert.deepStrictEqual(lastOf(parked).turn, TurnSchema.cases.AwaitingApproval.make({ messageId: "1", round: 0 }))
       // Watching a parked session is one Model too.
-      assert.deepStrictEqual(yield* Stream.runCollect(yield* api.sessions.watchSession({ params: { id: session.id } })), [parked.at(-1)!])
+      assert.deepStrictEqual(yield* Stream.runCollect(yield* api.sessions.watchSession({ params: { id: session.id } })), [lastOf(parked)])
 
       const resumed = yield* Stream.runCollect(
         yield* api.sessions.sendIntent({
@@ -172,11 +176,11 @@ layer(HttpPlatformLayerTest, { excludeTestServices: true })("sessions API", (it)
           payload: IntentSchema.cases.RespondedToolApproval.make({ toolCallId: "call-1", approved: true }),
         }),
       )
-      const last = resumed.at(-1)!
+      const last = lastOf(resumed)
       assert.deepStrictEqual(last.turn, TurnSchema.cases.Idle.make({}))
       assert.deepStrictEqual(texts(last), ["build it", "Done."])
       assert.deepStrictEqual(
-        last.messages[1]!.parts.map((p) => p.type),
+        last.messages[1]?.parts.map((p) => p.type),
         ["step-start", "tool-bash", "step-start", "text"],
       )
     }),

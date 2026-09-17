@@ -1,5 +1,6 @@
-import { Effect } from "effect"
-import { Migrator, type SqlClient, type SqlError } from "effect/unstable/sql"
+import type { Effect } from "effect"
+import { Migrator } from "effect/unstable/sql"
+import type { SqlClient, SqlError } from "effect/unstable/sql"
 
 import { initialSchema } from "./migrations/0001-initial-schema"
 

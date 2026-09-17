@@ -20,6 +20,7 @@ export interface Simulation<Model, Msg, R> {
 
 /** Method syntax on purpose: it keeps steps assignable when TypeScript infers a narrower Msg from one step's argument. */
 export interface Step<Model, Msg, R> {
+  // oxlint-disable-next-line typescript/method-signature-style -- see above
   run(simulation: Simulation<Model, Msg, R>, update: Update<Model, Msg, R>): Simulation<Model, Msg, R>
 }
 
@@ -40,6 +41,7 @@ export const story = <Model, Msg, R>(
   ...steps: ReadonlyArray<Step<Model, Msg, R>>
 ): Simulation<Model, Msg, R> => {
   const final = steps.reduce<Simulation<Model, Msg, R>>((simulation, current) => current.run(simulation, update), {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the first step is `given` or `booted`, which supplies the Model
     model: undefined as never,
     commands: [],
   })

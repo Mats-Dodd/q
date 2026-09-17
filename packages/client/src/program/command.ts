@@ -2,8 +2,9 @@ import type { ConversationModel, Intent } from "@q/domain/conversation/model"
 import * as Command from "@q/kit/command"
 import { Effect, Stream } from "effect"
 
-import { Transport } from "../transport/transport-service"
-import { type Message, MessageSchema } from "./message"
+import { Transport } from "@q/client/transport/transport-service"
+import { MessageSchema } from "./message"
+import type { Message } from "./message"
 
 // COMMANDS — every request streams whole Models back; each one replaces the mirror.
 

@@ -7,7 +7,7 @@ import { makeSqliteClientLayer, MigrationsLayer } from "./database"
 
 it.live("two clients on one file share the schema; migrations run once", () =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
+    const fs = Context.get(yield* Layer.build(BunFileSystem.layer), FileSystem.FileSystem)
     const directory = yield* fs.makeTempDirectoryScoped()
     const client = () => Layer.provideMerge(MigrationsLayer, makeSqliteClientLayer(`${directory}/q.db`))
 
@@ -16,5 +16,5 @@ it.live("two clients on one file share the schema; migrations run once", () =>
     yield* a`INSERT INTO session (id, cwd, created_at) VALUES (${"one"}, ${"/shared"}, ${0})`
     assert.deepStrictEqual(yield* b<{ id: string }>`SELECT id FROM session`, [{ id: "one" }])
     assert.deepStrictEqual(yield* b<{ n: number }>`SELECT COUNT(*) AS n FROM q_migrations`, [{ n: 1 }])
-  }).pipe(Effect.provide(BunFileSystem.layer)),
+  }),
 )

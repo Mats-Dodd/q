@@ -1,5 +1,6 @@
 import { Schema } from "effect"
-import { Tool, type Toolkit } from "effect/unstable/ai"
+import { Tool } from "effect/unstable/ai"
+import type { Toolkit } from "effect/unstable/ai"
 
 /**
  * The AI SDK UI message: what a client renders and what a server folds a stream into. Every field
@@ -256,17 +257,18 @@ export const ToolUIPart = <const Name extends string, Parameters extends Schema.
   name: Name,
   parameters: Parameters,
   success: Success,
-): Schema.Codec<ToolUIPart<Name, Parameters["Encoded"], Success["Encoded"]>> =>
-  toolStates({ ...toolBase, type: Schema.Literal(`tool-${name}`) }, Schema.toEncoded(parameters), Schema.toEncoded(success)).annotate({
-    identifier: `ToolUIPart(${name})`,
-  }) as any
+): Schema.Codec<ToolUIPart<Name, Parameters["Encoded"], Success["Encoded"]>> => {
+  const schema = toolStates({ ...toolBase, type: Schema.Literal(`tool-${name}`) }, Schema.toEncoded(parameters), Schema.toEncoded(success))
+  // oxlint-disable-next-line typescript/no-explicit-any, typescript/no-unsafe-type-assertion -- the states are built from loose schemas; the type is the mirror above
+  return schema.annotate({ identifier: `ToolUIPart(${name})` }) as any
+}
 
 /** @since 0.1.0 */
 export const DynamicToolUIPart: Schema.Codec<DynamicToolUIPart> = toolStates(
   { ...toolBase, type: Schema.Literal("dynamic-tool"), toolName: Schema.String },
   Schema.Unknown,
   Schema.Unknown,
-).annotate({ identifier: "DynamicToolUIPart" }) as any
+).annotate({ identifier: "DynamicToolUIPart" })
 
 /**
  * The tool parts of a toolkit, one union member per tool. Mirrors `Response.ToolCallParts<Tools>`.
@@ -333,8 +335,8 @@ export type ToolsOf<T extends Toolkit.Any> = T extends Toolkit.Toolkit<infer Too
  *
  * @since 0.1.0
  */
-export const UIMessagePart = <T extends Toolkit.Any>(toolkit: T): Schema.Codec<UIMessagePart<ToolsOf<T>>> =>
-  Schema.Union([
+export const UIMessagePart = <T extends Toolkit.Any>(toolkit: T): Schema.Codec<UIMessagePart<ToolsOf<T>>> => {
+  const schema = Schema.Union([
     TextUIPart,
     ReasoningUIPart,
     StepStartUIPart,
@@ -343,7 +345,10 @@ export const UIMessagePart = <T extends Toolkit.Any>(toolkit: T): Schema.Codec<U
     SourceDocumentUIPart,
     DynamicToolUIPart,
     ...toolUIParts(toolkit),
-  ]).annotate({ identifier: "UIMessagePart" }) as any
+  ])
+  // oxlint-disable-next-line typescript/no-explicit-any, typescript/no-unsafe-type-assertion -- the union is built per tool at runtime; its type is the mirror above, as in `Response.StreamPart`
+  return schema.annotate({ identifier: "UIMessagePart" }) as any
+}
 
 /**
  * The schema of a message for a toolkit.
@@ -351,7 +356,7 @@ export const UIMessagePart = <T extends Toolkit.Any>(toolkit: T): Schema.Codec<U
  * @since 0.1.0
  */
 export const UIMessage = <T extends Toolkit.Any>(toolkit: T): Schema.Codec<UIMessage<ToolsOf<T>>> =>
-  Schema.Struct({ id: Schema.String, role: Role, parts: Schema.Array(UIMessagePart(toolkit)) }).annotate({ identifier: "UIMessage" }) as any
+  Schema.Struct({ id: Schema.String, role: Role, parts: Schema.Array(UIMessagePart(toolkit)) }).annotate({ identifier: "UIMessage" })
 
 // -----------------------------------------------------------------------------
 // Guards

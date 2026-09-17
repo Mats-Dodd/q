@@ -1,7 +1,9 @@
 import { SessionId } from "@q/domain/session/model"
-import { type ConversationEvent, ConversationEventSchema } from "@q/domain/transcript/model"
+import { ConversationEventSchema } from "@q/domain/transcript/model"
+import type { ConversationEvent } from "@q/domain/transcript/model"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
-import { SqlClient, type SqlError, SqlSchema } from "effect/unstable/sql"
+import { SqlClient, SqlSchema } from "effect/unstable/sql"
+import type { SqlError } from "effect/unstable/sql"
 
 // The append-only event log, one row per event. Rows are this module's own writes: a row that does not decode dies.
 

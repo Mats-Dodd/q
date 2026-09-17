@@ -1,9 +1,10 @@
 import type * as Program from "@q/kit/program"
 import { Option } from "effect"
 
-import type { Transport } from "../transport/transport-service"
+import type { Transport } from "@q/client/transport/transport-service"
 import { Send, Watch } from "./command"
-import { type Message, MessageSchema } from "./message"
+import { MessageSchema } from "./message"
+import type { Message } from "./message"
 import type { Model } from "./model"
 
 type Return = Program.Return<Model, Message, Transport>
@@ -26,7 +27,9 @@ export const init = (): Return => ({
 export const update = (model: Model, message: Message): Return =>
   MessageSchema.match(message, {
     SubmittedPrompt: (intent) => {
-      if (intent.text.trim() === "" || !canSubmit(model)) return { model }
+      if (intent.text.trim() === "" || !canSubmit(model)) {
+        return { model }
+      }
       return {
         model: { ...model, pending: Option.some(intent.text), notice: Option.none() },
         commands: [Send({ intent })],

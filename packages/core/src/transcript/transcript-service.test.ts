@@ -4,10 +4,11 @@ import { OutcomeSchema } from "@q/domain/transcript/model"
 import { makePromptAccepted, makeTurnEnded } from "@q/factories/conversation-event"
 import { assertDies } from "@q/test/assertions/exit"
 import { CryptoLayerTest, DatabaseLayerTest } from "@q/test/db/layer"
+import { providing } from "@q/test/runtime"
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 
-import { SessionService } from "../session/session-service"
+import { SessionService } from "@q/core/session/session-service"
 import { TranscriptRepository } from "./transcript-repository"
 import { TranscriptService } from "./transcript-service"
 
@@ -42,7 +43,7 @@ layer(Services, { excludeTestServices: true })("TranscriptService", (it) => {
 
   it.effect("appends in flight together land in issue order", () =>
     Effect.gen(function* () {
-      const repository = yield* Effect.provide(TranscriptRepository, TranscriptRepository.layer)
+      const repository = yield* TranscriptRepository.pipe(providing(TranscriptRepository.layer))
       const session = yield* newSession("/inflight")
       const gate = yield* Deferred.make<void>()
       const order = yield* Ref.make<ReadonlyArray<string>>([])
@@ -53,14 +54,16 @@ layer(Services, { excludeTestServices: true })("TranscriptService", (it) => {
           ...repository,
           insert: (id, event) =>
             Effect.gen(function* () {
-              if (event._tag === "PromptAccepted") yield* Deferred.await(gate)
+              if (event._tag === "PromptAccepted") {
+                yield* Deferred.await(gate)
+              }
               yield* Ref.update(order, (all) => [...all, event._tag])
               yield* repository.insert(id, event)
             }),
         }),
       )
       // `fresh`: the block already built `TranscriptService.layer` over the real repository; this one must not reuse it.
-      const transcript = yield* Effect.provide(TranscriptService, Layer.fresh(TranscriptService.layer).pipe(Layer.provide(slow)))
+      const transcript = yield* TranscriptService.pipe(providing(Layer.fresh(TranscriptService.layer).pipe(Layer.provide(slow))))
 
       const a = yield* Effect.forkChild(transcript.append(session.id, prompt))
       const b = yield* Effect.forkChild(transcript.append(session.id, ended))

@@ -9,7 +9,7 @@ import { makeSession } from "@q/factories/session"
 import { Effect, Layer, Stream } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 
-import { HttpPlatformLayerTest } from "../http/platform-layer"
+import { HttpPlatformLayerTest } from "@q/test/http/platform-layer"
 
 // A scripted server behind the real `ApiClient`: the same encoding, routing and decoding as over a
 // socket, with handlers the test writes. Spread `defaultSessionsHandlers` and override what matters.

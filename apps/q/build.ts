@@ -1,3 +1,4 @@
+/* oxlint-disable effecttsgo/global-console -- a build script, outside the Effect runtime */
 import solidPlugin from "@opentui/solid/bun-plugin"
 
 const result = await Bun.build({
@@ -27,7 +28,9 @@ const result = await Bun.build({
 })
 
 if (!result.success) {
-  for (const message of result.logs) console.error(message)
+  for (const message of result.logs) {
+    console.error(message)
+  }
   process.exit(1)
 }
 

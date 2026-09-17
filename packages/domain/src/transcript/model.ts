@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-import { ChatMessagePartSchema } from "../conversation/model"
+import { ChatMessagePartSchema } from "@q/domain/conversation/model"
 
 // CONVERSATION EVENTS — the durable truth of the conversation.
 // Domain events at step granularity. Never transport chunks. Schema-validated at the repository boundary.

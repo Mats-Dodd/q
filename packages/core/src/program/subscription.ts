@@ -1,10 +1,12 @@
-import { type ChatChunk, type ConversationModel, TurnSchema } from "@q/domain/conversation/model"
+import { TurnSchema } from "@q/domain/conversation/model"
+import type { ChatChunk, ConversationModel } from "@q/domain/conversation/model"
 import * as Subscription from "@q/kit/subscription"
 import { Array, Cause, Effect, Option, Stream } from "effect"
 
-import { AgentService } from "../agent/agent-service"
-import { CurrentSession } from "../session/current-session"
-import { type Message, MessageSchema } from "./message"
+import { AgentService } from "@q/core/agent/agent-service"
+import { CurrentSession } from "@q/core/session/current-session"
+import { MessageSchema } from "./message"
+import type { Message } from "./message"
 
 // SUBSCRIPTION — chunks reach the Model the moment they arrive. Nothing here waits on a clock: a
 // delta that came in alone is one message now, not part of a frame later. What arrives together
@@ -12,11 +14,17 @@ import { type Message, MessageSchema } from "./message"
 
 /** Two deltas of the same part in the same step, in a row: one delta with the text of both. */
 const mergeDeltas = (last: Message, next: Message): Option.Option<Message> => {
-  if (last._tag !== "ReceivedChunk" || next._tag !== "ReceivedChunk") return Option.none()
-  if (last.messageId !== next.messageId || last.round !== next.round) return Option.none()
+  if (last._tag !== "ReceivedChunk" || next._tag !== "ReceivedChunk") {
+    return Option.none()
+  }
+  if (last.messageId !== next.messageId || last.round !== next.round) {
+    return Option.none()
+  }
   const a = last.chunk
   const b = next.chunk
-  if ((a.type !== "text-delta" && a.type !== "reasoning-delta") || b.type !== a.type || a.id !== b.id) return Option.none()
+  if ((a.type !== "text-delta" && a.type !== "reasoning-delta") || b.type !== a.type || a.id !== b.id) {
+    return Option.none()
+  }
   const chunk: ChatChunk = { ...a, delta: a.delta + b.delta }
   return Option.some(MessageSchema.cases.ReceivedChunk.make({ messageId: last.messageId, round: last.round, chunk }))
 }

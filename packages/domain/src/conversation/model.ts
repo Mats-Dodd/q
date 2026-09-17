@@ -2,7 +2,8 @@ import { Schema } from "effect"
 import { UIMessage, UIMessagePart } from "effect-ai-ui/UIMessage"
 import { UIMessageChunk } from "effect-ai-ui/UIMessageChunk"
 
-import { type AgentTools, AgentToolkit } from "../agent/tools"
+import { AgentToolkit } from "@q/domain/agent/tools"
+import type { AgentTools } from "@q/domain/agent/tools"
 
 // CONVERSATION MODEL — what a client sees of one session. The server folds it; a client mirrors it.
 // Messages are AI SDK UI messages, typed by the agent's toolkit: a tool part carries that tool's input and output.

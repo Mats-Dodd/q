@@ -1,12 +1,14 @@
 import { render } from "@opentui/solid"
 import { AgentConfig } from "@q/config/agent-config"
 import { DatabaseConfig } from "@q/config/database-config"
-import { type Resume, ResumeSchema, SessionId } from "@q/domain/session/model"
+import { ResumeSchema, SessionId } from "@q/domain/session/model"
+import type { Resume } from "@q/domain/session/model"
 import { App } from "@q/tui/view"
 import { Effect, Layer, Option } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 
-import { type Launch, TransportLayer } from "../layers/app"
+import { TransportLayer } from "q/layers/app"
+import type { Launch } from "q/layers/app"
 
 // `q` — the root command: pick the session, render. Subcommands read the shared `--db` by yielding `chatCommand`.
 
@@ -33,18 +35,16 @@ export const chatCommand = Command.make("q", {
       Flag.withDescription("SQLite file that holds every session. Also read from Q_DB; defaults under XDG_DATA_HOME."),
     ),
   }),
-  Command.withHandler((flags) =>
-    Effect.sync(() => {
-      const resume: Resume = Option.match(flags.resume, {
-        onSome: (id) => ResumeSchema.cases.Session.make({ id: SessionId.make(id) }),
-        onNone: () => (flags.continue ? ResumeSchema.cases.Latest.make({}) : ResumeSchema.cases.New.make({})),
-      })
-      const launch: Launch = { cwd: process.cwd(), resume, server: flags.server }
-      const config = Layer.mergeAll(Layer.succeed(DatabaseConfig, { path: flags.db }), AgentConfig.layer)
-      // OpenTUI owns the process from here. The runtime Scope, and with it the embedded server or the
-      // HTTP client, closes when the screen does.
-      render(() => <App layer={TransportLayer(launch).pipe(Layer.provide(config))} />)
-    }),
-  ),
+  Command.withHandler((flags) => {
+    const resume: Resume = Option.match(flags.resume, {
+      onSome: (id) => ResumeSchema.cases.Session.make({ id: SessionId.make(id) }),
+      onNone: () => (flags.continue ? ResumeSchema.cases.Latest.make({}) : ResumeSchema.cases.New.make({})),
+    })
+    const launch: Launch = { cwd: process.cwd(), resume, server: flags.server }
+    const config = Layer.mergeAll(Layer.succeed(DatabaseConfig, { path: flags.db }), AgentConfig.layer)
+    // OpenTUI owns the process from here: `render` resolves once the screen is up. The runtime Scope,
+    // and with it the embedded server or the HTTP client, closes when the screen does.
+    return Effect.promise(() => render(() => <App layer={TransportLayer(launch).pipe(Layer.provide(config))} />))
+  }),
   Command.withDescription("A terminal coding agent."),
 )

@@ -29,18 +29,20 @@ const partsOf = (script: typeof Script.Type): ReadonlyArray<Part> =>
   script.flatMap((step, i): ReadonlyArray<Part> => {
     const id = `id-${i}`
     switch (step._tag) {
-      case "Text":
+      case "Text": {
         return [
           Response.makePart("text-start", { id }),
           ...step.deltas.map((delta) => Response.makePart("text-delta", { id, delta })),
           Response.makePart("text-end", { id }),
         ]
-      case "Reasoning":
+      }
+      case "Reasoning": {
         return [
           Response.makePart("reasoning-start", { id }),
           ...step.deltas.map((delta) => Response.makePart("reasoning-delta", { id, delta })),
           Response.makePart("reasoning-end", { id }),
         ]
+      }
       case "Weather": {
         const result = { temperatureC: step.temperatureC, sky: step.sky }
         return [
@@ -166,14 +168,15 @@ describe("assistant steps", () => {
 
   it("an output error is a failed result with the error text", () => {
     const message: Message = { id: "a", role: "assistant", parts: [{ ...call, state: "output-error", errorText: "boom" }] }
-    const tool = convertToModelMessages([message]).content[1]!
-    assert.deepStrictEqual(tool, {
-      ...Prompt.makeMessage("tool", {
+    const tool = convertToModelMessages([message]).content[1]
+    assert.deepStrictEqual(
+      tool,
+      Prompt.makeMessage("tool", {
         content: [
           Prompt.makePart("tool-result", { id: "c1", name: "get_weather", isFailure: true, result: "boom", providerExecuted: false }),
         ],
       }),
-    })
+    )
   })
 
   it("a responded approval is the request and the response, and no result: the LanguageModel writes that", () => {
@@ -201,15 +204,17 @@ describe("assistant steps", () => {
       role: "assistant",
       parts: [{ ...call, state: "output-denied", approval: { id: "a1", approved: false, reason: "no" } }],
     }
-    const tool = convertToModelMessages([message]).content[1]!
-    assert.strictEqual(tool.role, "tool")
-    if (tool.role === "tool") {
+    const tool = convertToModelMessages([message]).content[1]
+    assert.strictEqual(tool?.role, "tool")
+    if (tool?.role === "tool") {
       assert.deepStrictEqual(
         tool.content.map((p) => p.type),
         ["tool-approval-response", "tool-result"],
       )
-      const result = tool.content[1]!
-      if (result.type === "tool-result") assert.deepStrictEqual(result.result, { type: "execution-denied", reason: "no" })
+      const result = tool.content[1]
+      if (result?.type === "tool-result") {
+        assert.deepStrictEqual(result.result, { type: "execution-denied", reason: "no" })
+      }
     }
   })
 

@@ -4,7 +4,7 @@ import { DatabaseLayer } from "@q/db/database"
 import { Console, DateTime, Effect, Layer } from "effect"
 import { Command } from "effect/unstable/cli"
 
-import { chatCommand } from "../chat"
+import { chatCommand } from "q/commands/chat"
 
 const listSessions = Effect.fn("listSessions")(function* listSessions(cwd: string) {
   const sessions = yield* SessionService

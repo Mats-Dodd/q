@@ -11,7 +11,10 @@ import type { Stream } from "effect"
  *
  * The Model argument is a snapshot at the moment the stream starts, for inputs too large to be
  * deps (the conversation so far). It does not update while the stream runs.
+ *
+ * `Deps` is `any` by default so that subscriptions with different deps fit one list; `make` pins it.
  */
+// oxlint-disable-next-line typescript/no-explicit-any -- see above
 export interface Subscription<Model, Msg, R = never, Deps = any> {
   readonly modelToDeps: (model: Model) => Deps
   readonly depsToStream: (deps: Deps, model: Model) => Stream.Stream<Msg, never, R>

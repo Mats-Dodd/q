@@ -1,5 +1,7 @@
-import { AgentToolkit, type Bash, type Edit, type Read, type Write } from "@q/domain/agent/tools"
-import { Duration, Effect, FileSystem, Path, type PlatformError, Ref, Stream } from "effect"
+import { AgentToolkit } from "@q/domain/agent/tools"
+import type { Bash, Edit, Read, Write } from "@q/domain/agent/tools"
+import { Duration, Effect, FileSystem, Path, Ref, Stream } from "effect"
+import type { PlatformError } from "effect"
 import type { Tool } from "effect/unstable/ai"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
@@ -29,20 +31,27 @@ const platformFailure =
   <Reason extends string>(map: { readonly notFound?: Reason; readonly badResource?: Reason; readonly io: Reason }) =>
   (error: PlatformError.PlatformError): { readonly reason: Reason; readonly message: string } => {
     const tag = error.reason._tag
-    const reason =
-      tag === "NotFound" && map.notFound !== undefined
-        ? map.notFound
-        : tag === "BadResource" && map.badResource !== undefined
-          ? map.badResource
-          : map.io
-    return { reason, message: error.message }
+    const reason = (): Reason => {
+      if (tag === "NotFound" && map.notFound !== undefined) {
+        return map.notFound
+      }
+      if (tag === "BadResource" && map.badResource !== undefined) {
+        return map.badResource
+      }
+      return map.io
+    }
+    return { reason: reason(), message: error.message }
   }
 
 /** The lines of `text`, without a trailing empty line for a file that ends in a newline. */
 const linesOf = (text: string): ReadonlyArray<string> => {
-  if (text.length === 0) return []
+  if (text.length === 0) {
+    return []
+  }
   const lines = text.split(/\r?\n/)
-  if (lines.at(-1) === "") lines.pop()
+  if (lines.at(-1) === "") {
+    lines.pop()
+  }
   return lines
 }
 
@@ -51,7 +60,9 @@ const cap = (lines: ReadonlyArray<string>): { readonly kept: ReadonlyArray<strin
   const kept: Array<string> = []
   let chars = 0
   for (const line of lines) {
-    if (kept.length >= READ_MAX_LINES || chars + line.length + 1 > READ_MAX_CHARS) return { kept, truncated: true }
+    if (kept.length >= READ_MAX_LINES || chars + line.length + 1 > READ_MAX_CHARS) {
+      return { kept, truncated: true }
+    }
     kept.push(line)
     chars += line.length + 1
   }

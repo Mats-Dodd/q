@@ -5,7 +5,8 @@ import { booted, emit, expectCommands, expectNoCommands, given, message, model, 
 import { Option } from "effect"
 
 import { Send, Watch } from "./command"
-import { type Message, MessageSchema } from "./message"
+import { MessageSchema } from "./message"
+import type { Message } from "./message"
 import type { Model } from "./model"
 import { canSubmit, init, update } from "./update"
 
@@ -13,7 +14,7 @@ const idle = idleModel
 const streaming = makeStreamingModel("hi", "h")
 
 const mirroring = (remote: typeof idle): Model => ({ remote: Option.some(remote), pending: Option.none(), notice: Option.none() })
-const unchanged = (before: Model, msg: Message) => assert.strictEqual(update(before, msg).model, before)
+const assertUnchanged = (before: Model, msg: Message) => assert.strictEqual(update(before, msg).model, before)
 
 describe("client update", () => {
   it("boot watches; the first Model fills the mirror", () => {
@@ -56,10 +57,10 @@ describe("client update", () => {
   })
 
   it("a prompt is refused while pending, while the server is busy, before the first Model, or blank", () => {
-    unchanged(init().model, MessageSchema.cases.SubmittedPrompt.make({ text: "hi" }))
-    unchanged(mirroring(streaming), MessageSchema.cases.SubmittedPrompt.make({ text: "hi" }))
-    unchanged({ ...mirroring(idle), pending: Option.some("one") }, MessageSchema.cases.SubmittedPrompt.make({ text: "two" }))
-    unchanged(mirroring(idle), MessageSchema.cases.SubmittedPrompt.make({ text: "  " }))
+    assertUnchanged(init().model, MessageSchema.cases.SubmittedPrompt.make({ text: "hi" }))
+    assertUnchanged(mirroring(streaming), MessageSchema.cases.SubmittedPrompt.make({ text: "hi" }))
+    assertUnchanged({ ...mirroring(idle), pending: Option.some("one") }, MessageSchema.cases.SubmittedPrompt.make({ text: "two" }))
+    assertUnchanged(mirroring(idle), MessageSchema.cases.SubmittedPrompt.make({ text: "  " }))
   })
 
   it("escape cancels a running turn, and otherwise refreshes the mirror", () => {

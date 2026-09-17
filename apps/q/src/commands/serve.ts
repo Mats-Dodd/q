@@ -4,7 +4,7 @@ import { ServerConfig } from "@q/config/server-config"
 import { Console, Effect, Layer } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 
-import { ServeLayer } from "../layers/app"
+import { ServeLayer } from "q/layers/app"
 import { chatCommand } from "./chat"
 
 export const serveCommand = Command.make(

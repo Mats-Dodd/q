@@ -1,6 +1,17 @@
 import type * as Runtime from "@q/kit/runtime"
-import { type Duration, Effect, Fiber, Stream } from "effect"
+import { Effect, Fiber, Layer, Stream } from "effect"
+import type { Duration, Scope } from "effect"
 import { TestClock } from "effect/testing"
+
+/**
+ * Build `layer` in the enclosing Scope and give its services to `self`. In a test body this replaces
+ * `Effect.provide(layer)`, which closes the Layer's scope as soon as `self` returns: a runtime made
+ * inside `self` would outlive the services it was given. The test's Scope outlives everything the test made.
+ */
+export const providing =
+  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E | E2, Exclude<R, ROut> | RIn | Scope.Scope> =>
+    Effect.flatMap(Layer.build(layer), (context) => Effect.provideContext(self, context))
 
 /**
  * Fork a wait for the first Message that satisfies `predicate`. Fork before the dispatch that

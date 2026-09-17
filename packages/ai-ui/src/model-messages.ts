@@ -1,6 +1,8 @@
-import { Prompt, type Tool } from "effect/unstable/ai"
+import { Prompt } from "effect/unstable/ai"
+import type { Tool } from "effect/unstable/ai"
 
-import { type AnyToolUIPart, type FileUIPart, getToolName, isToolUIPart, type UIMessage, type UIMessagePart } from "./ui-message"
+import { getToolName, isToolUIPart } from "./ui-message"
+import type { AnyToolUIPart, FileUIPart, UIMessage, UIMessagePart } from "./ui-message"
 
 /**
  * `UIMessage[]` to `Prompt.Prompt`: the AI SDK's `convertToModelMessages`, for Effect's prompt.
@@ -20,7 +22,7 @@ type AnyTools = Record<string, Tool.Any>
 type Part = UIMessagePart<AnyTools>
 type ToolPart = AnyToolUIPart<AnyTools>
 
-const options = (metadata: Prompt.ProviderOptions | undefined) => (metadata !== undefined ? { options: metadata } : {})
+const options = (metadata: Prompt.ProviderOptions | undefined) => (metadata === undefined ? {} : { options: metadata })
 
 type CompleteToolPart = Extract<ToolPart, { readonly state: "approval-responded" | "output-available" | "output-error" | "output-denied" }>
 
@@ -35,7 +37,7 @@ const filePart = (part: FileUIPart): Prompt.FilePart => {
   return Prompt.makePart("file", {
     mediaType: part.mediaType,
     data,
-    ...(part.filename !== undefined ? { fileName: part.filename } : {}),
+    ...(part.filename === undefined ? {} : { fileName: part.filename }),
     ...options(part.providerMetadata),
   })
 }
@@ -56,21 +58,27 @@ const assistantStep = (block: ReadonlyArray<Part>): ReadonlyArray<Prompt.Message
 
   for (const part of block) {
     switch (part.type) {
-      case "text":
+      case "text": {
         content.push(Prompt.makePart("text", { text: part.text, ...options(part.providerMetadata) }))
         break
-      case "reasoning":
+      }
+      case "reasoning": {
         content.push(Prompt.makePart("reasoning", { text: part.text, ...options(part.providerMetadata) }))
         break
-      case "file":
+      }
+      case "file": {
         content.push(filePart(part))
         break
+      }
       case "step-start":
       case "source-url":
-      case "source-document":
+      case "source-document": {
         break
+      }
       default: {
-        if (!isToolUIPart(part) || !isComplete(part)) break
+        if (!isToolUIPart(part) || !isComplete(part)) {
+          break
+        }
         content.push(
           Prompt.makePart("tool-call", {
             id: part.toolCallId,
@@ -88,43 +96,60 @@ const assistantStep = (block: ReadonlyArray<Part>): ReadonlyArray<Prompt.Message
           content.push(toolResult(part, part.state === "output-error", part.state === "output-error" ? part.errorText : part.output))
         }
         // The tool message: what the client executed, and what the user decided.
-        if (part.providerExecuted === true && approval === undefined) break
+        if (part.providerExecuted === true && approval === undefined) {
+          break
+        }
         if (approval !== undefined) {
           results.push(
             Prompt.makePart("tool-approval-response", { approvalId: approval.id, approved: approval.approved, reason: approval.reason }),
           )
         }
-        if (part.providerExecuted === true) break
+        if (part.providerExecuted === true) {
+          break
+        }
         switch (part.state) {
-          case "output-available":
+          case "output-available": {
             results.push(toolResult(part, false, part.output))
             break
-          case "output-error":
+          }
+          case "output-error": {
             results.push(toolResult(part, true, part.errorText))
             break
-          case "output-denied":
+          }
+          case "output-denied": {
             results.push(toolResult(part, true, { type: "execution-denied", reason: part.approval.reason }))
             break
-          case "approval-responded":
+          }
+          case "approval-responded": {
             break
+          }
         }
       }
     }
   }
 
   const messages: Array<Prompt.Message> = []
-  if (content.length > 0) messages.push(Prompt.makeMessage("assistant", { content }))
-  if (results.length > 0) messages.push(Prompt.makeMessage("tool", { content: results }))
+  if (content.length > 0) {
+    messages.push(Prompt.makeMessage("assistant", { content }))
+  }
+  if (results.length > 0) {
+    messages.push(Prompt.makeMessage("tool", { content: results }))
+  }
   return messages
 }
 
 const steps = (parts: ReadonlyArray<Part>): ReadonlyArray<ReadonlyArray<Part>> => {
-  const blocks: Array<Array<Part>> = [[]]
+  const blocks: Array<Array<Part>> = []
+  let current: Array<Part> = []
+  blocks.push(current)
   for (const part of parts) {
     if (part.type === "step-start") {
-      if (blocks.at(-1)!.length > 0) blocks.push([])
+      if (current.length > 0) {
+        current = []
+        blocks.push(current)
+      }
     } else {
-      blocks.at(-1)!.push(part)
+      current.push(part)
     }
   }
   return blocks
@@ -139,13 +164,18 @@ const convertMessage = (message: UIMessage<AnyTools>): ReadonlyArray<Prompt.Mess
     case "user": {
       const content: Array<Prompt.UserMessagePart> = []
       for (const part of message.parts) {
-        if (part.type === "text") content.push(Prompt.makePart("text", { text: part.text, ...options(part.providerMetadata) }))
-        if (part.type === "file") content.push(filePart(part))
+        if (part.type === "text") {
+          content.push(Prompt.makePart("text", { text: part.text, ...options(part.providerMetadata) }))
+        }
+        if (part.type === "file") {
+          content.push(filePart(part))
+        }
       }
       return content.length === 0 ? [] : [Prompt.makeMessage("user", { content })]
     }
-    case "assistant":
+    case "assistant": {
       return steps(message.parts).flatMap(assistantStep)
+    }
   }
 }
 
