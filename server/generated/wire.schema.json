@@ -1,0 +1,165 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RequestInvalid": {
+      "type": "object",
+      "properties": {
+        "_tag": {
+          "type": "string",
+          "enum": [
+            "RequestInvalid"
+          ]
+        },
+        "location": {
+          "type": "string",
+          "enum": [
+            "Params",
+            "Headers",
+            "Query",
+            "Payload"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RequestIssue"
+          }
+        }
+      },
+      "required": [
+        "_tag",
+        "location",
+        "message",
+        "issues"
+      ],
+      "additionalProperties": false
+    },
+    "RequestIssue": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          }
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "SessionNotFound": {
+      "type": "object",
+      "properties": {
+        "_tag": {
+          "type": "string",
+          "enum": [
+            "SessionNotFound"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/SessionId"
+        }
+      },
+      "required": [
+        "_tag",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "SessionId": {
+      "type": "string",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+      "format": "uuid"
+    },
+    "Session": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/SessionId"
+        },
+        "title": {
+          "$ref": "#/definitions/SessionTitle"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "title": "Session.json"
+    },
+    "SessionTitle": {
+      "type": "string",
+      "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "SessionUpdate": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "$ref": "#/definitions/SessionTitle"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "additionalProperties": false,
+      "title": "Session.jsonUpdate"
+    },
+    "SessionCreate": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "$ref": "#/definitions/SessionTitle"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "additionalProperties": false,
+      "title": "Session.jsonCreate"
+    },
+    "Health": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok"
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

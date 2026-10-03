@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
+  "extends": [
+    "./node_modules/@effect/tsgo/oxlint-presets/strict.json",
+    "./node_modules/@effect/tsgo/oxlint-presets/effect-native.json",
+    "./node_modules/@effect/tsgo/oxlint-presets/style.json"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "ignorePatterns": [
+    "node_modules",
+    "generated"
+  ],
+  "rules": {
+    "no-underscore-dangle": [
+      "error",
+      {
+        "allow": [
+          "_tag"
+        ]
+      }
+    ]
+  }
+}

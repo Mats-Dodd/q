@@ -1,0 +1,32 @@
+{
+  "name": "@q/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "Q_DEVTOOLS=true bun --watch src/main.ts serve",
+    "start": "bun src/main.ts serve",
+    "check": "bun run typecheck && bun run lint && bun run test",
+    "typecheck": "tsc --noEmit -p .",
+    "lint": "oxlint --type-aware --deny-warnings .",
+    "test": "bun --bun vitest run",
+    "test:watch": "bun --bun vitest",
+    "codegen": "bun scripts/codegen.ts",
+    "client": "bun scripts/client.ts",
+    "prepare": "effect-tsgo patch --oxlint"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0",
+    "@effect/sql-sqlite-bun": "4.0.0",
+    "effect": "4.0.0"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "0.48.0",
+    "@effect/vitest": "4.0.0",
+    "@types/bun": "1.4.2",
+    "oxlint": "1.86.0",
+    "oxlint-tsgolint": "7.0.2003",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}

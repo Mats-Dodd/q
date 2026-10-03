@@ -1,0 +1,460 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Api",
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "system.health",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Health",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RequestInvalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestInvalid"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError"
+          }
+        }
+      }
+    },
+    "/sessions": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions.create",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RequestInvalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestInvalid"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreate"
+              }
+            }
+          },
+          "required": true
+        }
+      },
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions.list",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Session"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RequestInvalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestInvalid"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError"
+          }
+        }
+      }
+    },
+    "/sessions/{id}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions.get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/SessionId"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RequestInvalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestInvalid"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SessionNotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionNotFound"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions.update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/SessionId"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RequestInvalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestInvalid"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SessionNotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionNotFound"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionUpdate"
+              }
+            }
+          },
+          "required": true
+        }
+      },
+      "delete": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions.remove",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/SessionId"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "<No Content>"
+          },
+          "400": {
+            "description": "RequestInvalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestInvalid"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SessionNotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionNotFound"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RequestInvalid": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RequestInvalid"
+            ]
+          },
+          "location": {
+            "type": "string",
+            "enum": [
+              "Params",
+              "Headers",
+              "Query",
+              "Payload"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestIssue"
+            }
+          }
+        },
+        "required": [
+          "_tag",
+          "location",
+          "message",
+          "issues"
+        ],
+        "additionalProperties": false
+      },
+      "RequestIssue": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "SessionNotFound": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "SessionNotFound"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/SessionId"
+          }
+        },
+        "required": [
+          "_tag",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "SessionId": {
+        "type": "string",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+        "format": "uuid"
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/SessionId"
+          },
+          "title": {
+            "$ref": "#/components/schemas/SessionTitle"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false,
+        "title": "Session.json"
+      },
+      "SessionTitle": {
+        "type": "string",
+        "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "SessionUpdate": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "$ref": "#/components/schemas/SessionTitle"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false,
+        "title": "Session.jsonUpdate"
+      },
+      "SessionCreate": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "$ref": "#/components/schemas/SessionTitle"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false,
+        "title": "Session.jsonCreate"
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {}
+  },
+  "security": [],
+  "tags": [
+    {
+      "name": "system"
+    },
+    {
+      "name": "sessions"
+    }
+  ]
+}
