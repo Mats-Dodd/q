@@ -2,7 +2,7 @@
  * Writes every generated artifact (`generated/wire.schema.json`,
  * `generated/openapi.json`). `test/Codegen.test.ts` fails when they drift.
  *
- * Rust types: `cargo typify generated/wire.schema.json`.
+ * The Rust client generates its types from `generated/wire.schema.json` (its `build.rs`).
  */
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { Effect, FileSystem, Path } from "effect"

@@ -63,6 +63,49 @@
       ],
       "additionalProperties": false
     },
+    "TurnNotRunning": {
+      "type": "object",
+      "properties": {
+        "_tag": {
+          "type": "string",
+          "enum": [
+            "TurnNotRunning"
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/definitions/SessionId"
+        }
+      },
+      "required": [
+        "_tag",
+        "sessionId"
+      ],
+      "additionalProperties": false
+    },
+    "SessionId": {
+      "type": "string",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+      "format": "uuid"
+    },
+    "TurnInProgress": {
+      "type": "object",
+      "properties": {
+        "_tag": {
+          "type": "string",
+          "enum": [
+            "TurnInProgress"
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/definitions/SessionId"
+        }
+      },
+      "required": [
+        "_tag",
+        "sessionId"
+      ],
+      "additionalProperties": false
+    },
     "SessionNotFound": {
       "type": "object",
       "properties": {
@@ -82,10 +125,1125 @@
       ],
       "additionalProperties": false
     },
-    "SessionId": {
+    "Turn": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/TurnId"
+        },
+        "sessionId": {
+          "$ref": "#/definitions/SessionId"
+        },
+        "status": {
+          "$ref": "#/definitions/TurnStatus"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "sessionId",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "title": "Turn.json"
+    },
+    "TurnStatus": {
+      "type": "string",
+      "enum": [
+        "running",
+        "completed",
+        "cancelled",
+        "failed"
+      ]
+    },
+    "TurnId": {
       "type": "string",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
       "format": "uuid"
+    },
+    "StartTurn": {
+      "type": "object",
+      "properties": {
+        "turnId": {
+          "$ref": "#/definitions/TurnId"
+        },
+        "text": {
+          "$ref": "#/definitions/MessageText"
+        }
+      },
+      "required": [
+        "turnId",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "MessageText": {
+      "type": "string",
+      "minLength": 1
+    },
+    "Offset": {
+      "type": "string"
+    },
+    "StreamEvent": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StreamDataEvent"
+        },
+        {
+          "$ref": "#/definitions/StreamControlEvent"
+        }
+      ]
+    },
+    "StreamControlEvent": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "control"
+          ]
+        },
+        "data": {
+          "$ref": "#/definitions/StreamControlJson"
+        }
+      },
+      "required": [
+        "event",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "StreamControlJson": {
+      "type": "string",
+      "contentMediaType": "application/json"
+    },
+    "StreamDataEvent": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "data"
+          ]
+        },
+        "data": {
+          "$ref": "#/definitions/StreamChunksJson"
+        }
+      },
+      "required": [
+        "event",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "StreamChunksJson": {
+      "type": "string",
+      "contentMediaType": "application/json"
+    },
+    "StreamChunks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/StreamChunk"
+      }
+    },
+    "StreamChunk": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StartChunk"
+        },
+        {
+          "$ref": "#/definitions/FinishChunk"
+        },
+        {
+          "$ref": "#/definitions/AbortChunk"
+        },
+        {
+          "$ref": "#/definitions/MessageMetadataChunk"
+        },
+        {
+          "$ref": "#/definitions/ErrorChunk"
+        },
+        {
+          "$ref": "#/definitions/StartStepChunk"
+        },
+        {
+          "$ref": "#/definitions/FinishStepChunk"
+        },
+        {
+          "$ref": "#/definitions/ResetStepChunk"
+        },
+        {
+          "$ref": "#/definitions/TextStartChunk"
+        },
+        {
+          "$ref": "#/definitions/TextDeltaChunk"
+        },
+        {
+          "$ref": "#/definitions/TextEndChunk"
+        },
+        {
+          "$ref": "#/definitions/ReasoningStartChunk"
+        },
+        {
+          "$ref": "#/definitions/ReasoningDeltaChunk"
+        },
+        {
+          "$ref": "#/definitions/ReasoningEndChunk"
+        },
+        {
+          "$ref": "#/definitions/ToolInputStartChunk"
+        },
+        {
+          "$ref": "#/definitions/ToolInputDeltaChunk"
+        },
+        {
+          "$ref": "#/definitions/ToolInputAvailableChunk"
+        },
+        {
+          "$ref": "#/definitions/ToolInputErrorChunk"
+        },
+        {
+          "$ref": "#/definitions/ToolApprovalRequestChunk"
+        },
+        {
+          "$ref": "#/definitions/ToolApprovalResponseChunk"
+        },
+        {
+          "$ref": "#/definitions/ToolOutputAvailableChunk"
+        },
+        {
+          "$ref": "#/definitions/ToolOutputErrorChunk"
+        },
+        {
+          "$ref": "#/definitions/ToolOutputDeniedChunk"
+        },
+        {
+          "$ref": "#/definitions/SourceUrlChunk"
+        },
+        {
+          "$ref": "#/definitions/SourceDocumentChunk"
+        },
+        {
+          "$ref": "#/definitions/FileChunk"
+        },
+        {
+          "$ref": "#/definitions/ReasoningFileChunk"
+        },
+        {
+          "$ref": "#/definitions/CustomChunk"
+        },
+        {
+          "$ref": "#/definitions/UserMessageChunk"
+        },
+        {
+          "$ref": "#/definitions/TurnStartedChunk"
+        },
+        {
+          "$ref": "#/definitions/TurnEndedChunk"
+        }
+      ]
+    },
+    "TurnEndedChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "data-turn-end"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/TurnId"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/definitions/TurnEndReason"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "TurnEndReason": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "cancelled",
+        "failed"
+      ]
+    },
+    "TurnStartedChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "data-turn-start"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/TurnId"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "model"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "UserMessageChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "data-user-message"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/TurnId"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "$ref": "#/definitions/MessageText"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "CustomChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "custom"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "ReasoningFileChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "reasoning-file"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "url",
+        "mediaType"
+      ],
+      "additionalProperties": false
+    },
+    "FileChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "file"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "url",
+        "mediaType"
+      ],
+      "additionalProperties": false
+    },
+    "SourceDocumentChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "source-document"
+          ]
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "sourceId",
+        "mediaType",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "SourceUrlChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "source-url"
+          ]
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "sourceId",
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "ToolOutputDeniedChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool-output-denied"
+          ]
+        },
+        "toolCallId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "toolCallId"
+      ],
+      "additionalProperties": false
+    },
+    "ToolOutputErrorChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool-output-error"
+          ]
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "errorText": {
+          "type": "string"
+        },
+        "providerExecuted": {
+          "type": "boolean"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "toolMetadata": {
+          "type": "object"
+        },
+        "dynamic": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "toolCallId",
+        "errorText"
+      ],
+      "additionalProperties": false
+    },
+    "ToolOutputAvailableChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool-output-available"
+          ]
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "output": {},
+        "preliminary": {
+          "type": "boolean"
+        },
+        "providerExecuted": {
+          "type": "boolean"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "toolMetadata": {
+          "type": "object"
+        },
+        "dynamic": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "toolCallId",
+        "output"
+      ],
+      "additionalProperties": false
+    },
+    "ToolApprovalResponseChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool-approval-response"
+          ]
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "approved": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "providerExecuted": {
+          "type": "boolean"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "approvalId",
+        "approved"
+      ],
+      "additionalProperties": false
+    },
+    "ToolApprovalRequestChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool-approval-request"
+          ]
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "approvalDescriptor": {},
+        "inputSchemaInput": {},
+        "reason": {
+          "type": "string"
+        },
+        "isAutomatic": {
+          "type": "boolean"
+        },
+        "signature": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "approvalId",
+        "toolCallId"
+      ],
+      "additionalProperties": false
+    },
+    "ToolInputErrorChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool-input-error"
+          ]
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "input": {},
+        "errorText": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "providerExecuted": {
+          "type": "boolean"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "toolMetadata": {
+          "type": "object"
+        },
+        "dynamic": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "toolCallId",
+        "toolName",
+        "input",
+        "errorText"
+      ],
+      "additionalProperties": false
+    },
+    "ToolInputAvailableChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool-input-available"
+          ]
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "input": {},
+        "title": {
+          "type": "string"
+        },
+        "providerExecuted": {
+          "type": "boolean"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "toolMetadata": {
+          "type": "object"
+        },
+        "dynamic": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "toolCallId",
+        "toolName",
+        "input"
+      ],
+      "additionalProperties": false
+    },
+    "ToolInputDeltaChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool-input-delta"
+          ]
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "inputTextDelta": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "toolCallId",
+        "inputTextDelta"
+      ],
+      "additionalProperties": false
+    },
+    "ToolInputStartChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool-input-start"
+          ]
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "providerExecuted": {
+          "type": "boolean"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "toolMetadata": {
+          "type": "object"
+        },
+        "dynamic": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "toolCallId",
+        "toolName"
+      ],
+      "additionalProperties": false
+    },
+    "ReasoningEndChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "reasoning-end"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "ReasoningDeltaChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "reasoning-delta"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "delta": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "delta"
+      ],
+      "additionalProperties": false
+    },
+    "ReasoningStartChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "reasoning-start"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "TextEndChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "text-end"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "TextDeltaChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "text-delta"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "delta": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "delta"
+      ],
+      "additionalProperties": false
+    },
+    "TextStartChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "text-start"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "ResetStepChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "reset-step"
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "FinishStepChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "finish-step"
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "StartStepChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "start-step"
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "ErrorChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "error"
+          ]
+        },
+        "errorText": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "errorText"
+      ],
+      "additionalProperties": false
+    },
+    "MessageMetadataChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "message-metadata"
+          ]
+        },
+        "messageMetadata": {}
+      },
+      "required": [
+        "type",
+        "messageMetadata"
+      ],
+      "additionalProperties": false
+    },
+    "AbortChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "abort"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "FinishChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "finish"
+          ]
+        },
+        "finishReason": {
+          "$ref": "#/definitions/FinishReason"
+        },
+        "messageMetadata": {}
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "FinishReason": {
+      "type": "string",
+      "enum": [
+        "stop",
+        "length",
+        "content-filter",
+        "tool-calls",
+        "error",
+        "other"
+      ]
+    },
+    "StartChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "start"
+          ]
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "messageMetadata": {}
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "ReadFrom": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "now"
+          ]
+        },
+        {
+          "$ref": "#/definitions/Offset"
+        }
+      ]
     },
     "Session": {
       "type": "object",
@@ -158,6 +1316,27 @@
       },
       "required": [
         "status"
+      ],
+      "additionalProperties": false
+    },
+    "StreamControl": {
+      "type": "object",
+      "properties": {
+        "streamNextOffset": {
+          "$ref": "#/definitions/Offset"
+        },
+        "streamCursor": {
+          "type": "string"
+        },
+        "upToDate": {
+          "type": "boolean"
+        },
+        "streamClosed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "streamNextOffset"
       ],
       "additionalProperties": false
     }

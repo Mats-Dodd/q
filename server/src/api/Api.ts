@@ -1,7 +1,9 @@
 import { HttpApi } from "effect/http-api"
 import { ApiErrors } from "./ApiErrors.ts"
 import { SessionsApi } from "./SessionsApi.ts"
+import { SessionStreamApi } from "./SessionStreamApi.ts"
 import { SystemApi } from "./SystemApi.ts"
+import { TurnsApi } from "./TurnsApi.ts"
 
 /**
  * The server contract. Pure description: no handlers, no runtime dependencies.
@@ -9,6 +11,6 @@ import { SystemApi } from "./SystemApi.ts"
  * OpenAPI / JSON Schema generators.
  */
 export class Api extends HttpApi.make("q")
-  .add(SystemApi, SessionsApi)
+  .add(SystemApi, SessionsApi, SessionStreamApi, TurnsApi)
   .middleware(ApiErrors)
 {}

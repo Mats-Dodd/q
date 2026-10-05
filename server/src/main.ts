@@ -1,7 +1,7 @@
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
 import { Command, Flag } from "effect/cli"
-import { HttpRouter } from "effect/http"
+import { FetchHttpClient, HttpRouter } from "effect/http"
 import pkg from "../package.json" with { type: "json" }
 import { AppLive } from "./AppLive.ts"
 import { ApiLive } from "./http/Http.ts"
@@ -34,7 +34,7 @@ const cli = Command.make("q-server").pipe(
 
 const MainLive = Observability.layer.pipe(
   Layer.provide(ServerConfig.ServerConfig.layer),
-  Layer.provideMerge(BunServices.layer)
+  Layer.provideMerge(Layer.mergeAll(BunServices.layer, FetchHttpClient.layer))
 )
 
 Command.run(cli, { version: pkg.version }).pipe(

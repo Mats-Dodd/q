@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Context, DateTime, Effect, Layer, Option, Schema } from "effect"
 import { SqlClient, type SqlError, SqlModel, SqlSchema } from "effect/sql"
 import { Session, SessionId } from "../domain/Session.ts"
 
@@ -19,6 +19,8 @@ export interface SessionRepoShape {
   readonly findAll: Effect.Effect<ReadonlyArray<Session>, SqlError.SqlError>
   /** `false` when no session had that id. */
   readonly delete: (id: SessionId) => Effect.Effect<boolean, SqlError.SqlError>
+  /** Marks the session as just used (bumps `updatedAt`); `false` when no session has that id. */
+  readonly touch: (id: SessionId) => Effect.Effect<boolean, SqlError.SqlError>
 }
 
 export class SessionRepo extends Context.Service<SessionRepo, SessionRepoShape>()("@q/server/services/SessionRepo", {
@@ -48,6 +50,12 @@ export class SessionRepo extends Context.Service<SessionRepo, SessionRepoShape>(
       execute: (id) => sql`DELETE FROM sessions WHERE id = ${id} RETURNING id`
     })
 
+    const touch = SqlSchema.findOneOption({
+      Request: Schema.Struct({ id: SessionId, updatedAt: Schema.DateTimeUtcFromString }),
+      Result: Schema.Struct({ id: SessionId }),
+      execute: ({ id, updatedAt }) => sql`UPDATE sessions SET updated_at = ${updatedAt} WHERE id = ${id} RETURNING id`
+    })
+
     return {
       insert: (session) => repo.insert(session).pipe(Effect.catchTag("SchemaError", Effect.die)),
       update: Effect.fn("SessionRepo.update")((session) =>
@@ -58,7 +66,11 @@ export class SessionRepo extends Context.Service<SessionRepo, SessionRepoShape>(
       findAll: findAll(undefined).pipe(Effect.catchTag("SchemaError", Effect.die), Effect.withSpan("SessionRepo.findAll")),
       delete: Effect.fn("SessionRepo.delete")((id) =>
         remove(id).pipe(Effect.map(Option.isSome), Effect.catchTag("SchemaError", Effect.die))
-      )
+      ),
+      touch: Effect.fn("SessionRepo.touch")(function*(id) {
+        const touched = yield* touch({ id, updatedAt: yield* DateTime.now })
+        return Option.isSome(touched)
+      }, Effect.catchTag("SchemaError", Effect.die))
     } satisfies SessionRepoShape
   })
 }) {

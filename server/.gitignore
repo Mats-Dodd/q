@@ -2,3 +2,4 @@ node_modules
 .data
 .scratch
 *.log
+.env

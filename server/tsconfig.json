@@ -33,6 +33,8 @@
           "effect/devtools",
           "effect/encoding",
           "effect/cli",
+          "effect/ai",
+          "@effect/ai-anthropic",
           "@effect/sql-sqlite-bun",
           "@effect/platform-bun"
         ],
