@@ -28,7 +28,7 @@ The client reads `Q_SERVER_URL`.
 ```
 src/domain/      Model.Class schemas, branded ids, domain errors — depends on nothing
 src/api/         HttpApi contract (also the source of all generated schemas) — domain only
-src/services/    repos + domain services (SessionRuntimes, AgentLoop, SessionStreams, ModelLog)
+src/services/    repos + domain services (SessionRuntimes, AgentLoop, SessionEventLog, SessionStreams)
 src/ai/          the LanguageModel layer: which provider turns run on
 src/http/        HttpApiBuilder handlers (thin) + ApiLive
 src/db/          SqlClient layer, migrations, Database (migrated SqlClient)
@@ -81,38 +81,36 @@ src/main.ts      Bun entry (effect/cli), the only place platform layers are chos
   (`allowedUnstableApis`). Adding a new unstable module there is a deliberate decision.
   Versions of `effect` / `@effect/*` are pinned exactly.
 
-## Sessions, streams and turns
+## Sessions, events and projections
 
-Vocabulary (keep names to it): a **session** is a conversation; its **session
-stream** is what clients read, made of **stream chunks** (**UI chunks**, the AI SDK
-protocol's, plus our `data-*` session chunks); an **offset** is a position in it
-(`seq` only inside SQL); reads are **catch-up** or **live** (`follow`). A **turn** is
-one user message and the work done on it; its **reply** is the assistant's part.
-The **model log** is what the model has seen and said. A **session runtime** runs a
-session's turns. **Commands** are what clients ask for.
+Vocabulary (keep names to it): a **session** is a conversation, a sequence of
+**turns**; a turn is one activation of the agent, from the user's message through
+its reasoning, tool calls and output to the reply, made of **steps** (model calls).
+A session's **events** are the single record of what happened; everything else is a
+**projection** of them. Clients send **messages** (with their own `MessageId`, so
+retries are safe); the server decides what a message does (today: start a turn).
 
-- **Two records, two readers.** The session stream is the only state clients consult:
-  an append-only log of `StreamChunk`s served with the read side of the Durable
-  Streams protocol (`GET`/`HEAD /sessions/:id/stream`, JSON mode, catch-up and
-  `live=sse`). The **model log** (`ModelLog`, `model_messages`) is the agent's record:
-  `effect/ai` prompt messages with what providers need back (reasoning signatures,
-  tool call ids); prompts are built from it, never from the stream.
-- **Commands** (`TurnsApi`) return quickly; their effects show up in the stream.
-- **`SessionRuntimes`**: an actor per session (an `RcMap` entry, started on first use,
-  stopped when idle; a running turn holds it open). Its commands run one at a time;
-  the turn runs as a child fiber in a `FiberHandle`, so cancelling is interruption.
-  Each runtime is its session's only writer, which keeps its stream in order.
-  Whether a turn may start is the database's call: a unique index allows one running
-  turn per session (a `UniqueViolation` is `TurnInProgress`).
-- **`AgentLoop`** is the turn itself: record the user's message (model log + stream,
-  one transaction), stream the model's reply into the stream (batched with
-  `groupedWithin`; failures travel through the batching as values so what was said is
-  kept), and however it ends record it in one transaction: the turn row first (so a
-  client that sees the end can start the next turn), the reply in the model log
-  (unfinished text kept, unfinished reasoning dropped), then the closing chunks.
-  Turns cut off by a crash are failed on startup.
-- **`SessionStreams`** appends and reads; live readers subscribe to a per-session
-  PubSub (in an `RcMap`, alive only while someone reads) before catching up.
+- **One store.** `session_events` (via `SessionEventLog`) holds every session's
+  events (`domain/SessionEvent.ts`): `TurnStarted`, `StepStarted`, `ModelOutput` (the
+  model's raw `effect/ai` parts, batched: every delta, signatures, ids), `TurnEnded`
+  (`Completed | Cancelled | Failed`). Events are never changed; evolve them by adding
+  event types or optional fields. Appends are checked against the writer's version
+  (`VersionConflict`), mark the session used, and are published only once committed.
+- **Projections.** The **session stream** clients read is `streamChunksOf` applied to
+  every event (`domain/StreamProjection.ts`): offsets are event seqs, reads end on
+  event boundaries, and projecting must be deterministic. The **model's history** and
+  turn state are `SessionState`, the events folded (`evolve`).
+- **Decider.** `domain/SessionState.ts` is pure: `evolve(state, event)` and
+  `decide…(state, command)`. Test session rules there, without a server.
+- **`SessionRuntimes`**: an actor per session (`RcMap`, idle eviction; a running turn
+  holds it open) holding its folded state. Every change goes through `transact`:
+  decide from the state, append, fold in, as one uninterruptible step. Commands run
+  one at a time; the turn is a child fiber (cancel = interrupt). On open, a turn left
+  running by a crash is ended as failed; startup opens such sessions.
+- **`AgentLoop`** is the agent and only the agent: history in, a stream of
+  `AgentOutput` (steps, raw parts) out. No storage, no sessions; the runtime records
+  what it produces (batched into `ModelOutput`s; failures travel through the batching
+  as values so what was produced is kept).
 
 ## Wire types (anything a non-TypeScript client sees)
 

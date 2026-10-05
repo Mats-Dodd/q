@@ -7,25 +7,25 @@ import { ApiClient } from "../src/client/ApiClient.ts"
 import * as Offset from "../src/domain/Offset.ts"
 import { SessionId, SessionNotFound } from "../src/domain/Session.ts"
 import type { StreamChunk } from "../src/domain/StreamChunk.ts"
-import { SessionStreams } from "../src/services/SessionStreams.ts"
+import { appendEvents, output } from "./support/Events.ts"
 import { ServerTest } from "./support/ServerTest.ts"
 
 const missing = SessionId.make("00000000-0000-7000-8000-000000000000")
 
+/** The chunk an `output(text)` event projects to. */
 const delta = (text: string): StreamChunk => ({ type: "text-delta", id: "t0", delta: text })
 
 /** A 400 response whose body is a `RequestInvalid`. */
 const BadRequest = Schema.Struct({ status: Schema.Literal(400), body: RequestInvalid })
 
-/** A session with `chunks` already in its stream. */
-const sessionWith = (chunks: ReadonlyArray<StreamChunk>) =>
+/** A session whose log holds one model output event per text. */
+const sessionWith = (...texts: ReadonlyArray<string>) =>
   Effect.gen(function*() {
     const client = yield* ApiClient
-    const streams = yield* SessionStreams
     const { id } = yield* client.sessions.create({ payload: { title: "stream api" } })
-    const [first, ...rest] = chunks
+    const [first, ...rest] = texts.map((text) => output(text))
     if (first !== undefined) {
-      yield* streams.append(id, [first, ...rest])
+      yield* appendEvents(id, [first, ...rest])
     }
     return id
   })
@@ -53,7 +53,7 @@ layer(ServerTest)("Session stream API", (it) => {
   it.effect("catch-up returns every chunk and the next offset", () =>
     Effect.gen(function*() {
       const http = yield* HttpClient.HttpClient
-      const id = yield* sessionWith([delta("a"), delta("b")])
+      const id = yield* sessionWith("a", "b")
       const response = yield* http.get(`/sessions/${id}/stream?offset=-1`)
       strictEqual(response.status, 200)
       strictEqual(response.headers["content-type"], "application/json")
@@ -66,7 +66,7 @@ layer(ServerTest)("Session stream API", (it) => {
   it.effect("no offset reads from the start", () =>
     Effect.gen(function*() {
       const http = yield* HttpClient.HttpClient
-      const id = yield* sessionWith([delta("a")])
+      const id = yield* sessionWith("a")
       const implicit = yield* http.get(`/sessions/${id}/stream`).pipe(Effect.flatMap((response) => response.json))
       const explicit = yield* http.get(`/sessions/${id}/stream?offset=-1`).pipe(Effect.flatMap((response) => response.json))
       deepStrictEqual(implicit, explicit)
@@ -75,11 +75,10 @@ layer(ServerTest)("Session stream API", (it) => {
   it.effect("reading from the returned offset resumes without duplicates", () =>
     Effect.gen(function*() {
       const http = yield* HttpClient.HttpClient
-      const streams = yield* SessionStreams
-      const id = yield* sessionWith([delta("a")])
+      const id = yield* sessionWith("a")
       const first = yield* http.get(`/sessions/${id}/stream`)
       const next = first.headers["stream-next-offset"]
-      yield* streams.append(id, [delta("b")])
+      yield* appendEvents(id, [output("b")])
       const resumed = yield* http.get(`/sessions/${id}/stream?offset=${next}`)
       deepStrictEqual(yield* resumed.json, [delta("b")])
     }))
@@ -87,7 +86,7 @@ layer(ServerTest)("Session stream API", (it) => {
   it.effect("a matching If-None-Match is a 304", () =>
     Effect.gen(function*() {
       const http = yield* HttpClient.HttpClient
-      const id = yield* sessionWith([delta("a")])
+      const id = yield* sessionWith("a")
       const first = yield* http.get(`/sessions/${id}/stream`)
       const etag = first.headers.etag ?? ""
       const again = yield* http.execute(
@@ -103,7 +102,7 @@ layer(ServerTest)("Session stream API", (it) => {
   it.effect("offset=now is an empty, uncacheable read of the end", () =>
     Effect.gen(function*() {
       const http = yield* HttpClient.HttpClient
-      const id = yield* sessionWith([delta("history")])
+      const id = yield* sessionWith("history")
       const response = yield* http.get(`/sessions/${id}/stream?offset=now`)
       strictEqual(response.status, 200)
       deepStrictEqual(yield* response.json, [])
@@ -115,7 +114,7 @@ layer(ServerTest)("Session stream API", (it) => {
   it.effect("HEAD returns the next offset without a body", () =>
     Effect.gen(function*() {
       const http = yield* HttpClient.HttpClient
-      const id = yield* sessionWith([delta("a"), delta("b"), delta("c")])
+      const id = yield* sessionWith("a", "b", "c")
       const response = yield* http.execute(HttpClientRequest.head(`/sessions/${id}/stream`))
       strictEqual(response.status, 200)
       strictEqual(response.headers["stream-next-offset"], "0000000000000003")
@@ -139,7 +138,7 @@ layer(ServerTest)("Session stream API", (it) => {
   it.effect("malformed offsets are a 400", () =>
     Effect.gen(function*() {
       const http = yield* HttpClient.HttpClient
-      const id = yield* sessionWith([])
+      const id = yield* sessionWith()
       for (const offset of ["0,1", "1%202", "abc", "12"]) {
         const { body } = yield* http.get(`/sessions/${id}/stream?offset=${offset}`).pipe(
           Effect.flatMap(HttpClientResponse.schemaJson(BadRequest))
@@ -151,7 +150,7 @@ layer(ServerTest)("Session stream API", (it) => {
   it.effect("live reads require an offset", () =>
     Effect.gen(function*() {
       const http = yield* HttpClient.HttpClient
-      const id = yield* sessionWith([])
+      const id = yield* sessionWith()
       const { body } = yield* http.get(`/sessions/${id}/stream?live=sse`).pipe(
         Effect.flatMap(HttpClientResponse.schemaJson(BadRequest))
       )
@@ -161,7 +160,7 @@ layer(ServerTest)("Session stream API", (it) => {
   it.effect("SSE is uncached text/event-stream", () =>
     Effect.gen(function*() {
       const client = yield* ApiClient
-      const id = yield* sessionWith([delta("a")])
+      const id = yield* sessionWith("a")
       const [, response] = yield* client.sessionStream.read({
         params: { id },
         query: { offset: Offset.beginning, live: "sse" },
@@ -175,7 +174,7 @@ layer(ServerTest)("Session stream API", (it) => {
 
   it.effect("SSE catch-up: every data event is followed by a control event", () =>
     Effect.gen(function*() {
-      const id = yield* sessionWith([delta("a"), delta("b")])
+      const id = yield* sessionWith("a", "b")
       const [data, control] = yield* Fiber.join(yield* openLive(id, 2))
       deepStrictEqual(data, { event: "data", data: [delta("a"), delta("b")] })
       strictEqual(control?.event, "control")
@@ -188,17 +187,16 @@ layer(ServerTest)("Session stream API", (it) => {
 
   it.effect("SSE on an empty stream is a control event at the start", () =>
     Effect.gen(function*() {
-      const id = yield* sessionWith([])
+      const id = yield* sessionWith()
       const [control] = yield* Fiber.join(yield* openLive(id, 1))
       deepStrictEqual(control?.event === "control" && control.data.streamNextOffset, Offset.beginning)
     }))
 
   it.effect("SSE delivers appends as they happen", () =>
     Effect.gen(function*() {
-      const streams = yield* SessionStreams
-      const id = yield* sessionWith([])
+      const id = yield* sessionWith()
       const reader = yield* openLive(id, 3)
-      yield* streams.append(id, [delta("live")])
+      yield* appendEvents(id, [output("live")])
       const [, data, control] = yield* Fiber.join(reader)
       deepStrictEqual(data, { event: "data", data: [delta("live")] })
       strictEqual(control?.event === "control" && control.data.streamNextOffset, Offset.Offset.make(1))

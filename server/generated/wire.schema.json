@@ -63,13 +63,13 @@
       ],
       "additionalProperties": false
     },
-    "TurnNotRunning": {
+    "NothingToCancel": {
       "type": "object",
       "properties": {
         "_tag": {
           "type": "string",
           "enum": [
-            "TurnNotRunning"
+            "NothingToCancel"
           ]
         },
         "sessionId": {
@@ -87,13 +87,13 @@
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
       "format": "uuid"
     },
-    "TurnInProgress": {
+    "SessionBusy": {
       "type": "object",
       "properties": {
         "_tag": {
           "type": "string",
           "enum": [
-            "TurnInProgress"
+            "SessionBusy"
           ]
         },
         "sessionId": {
@@ -125,63 +125,42 @@
       ],
       "additionalProperties": false
     },
-    "Turn": {
+    "Delivery": {
       "type": "object",
       "properties": {
-        "id": {
+        "turnId": {
           "$ref": "#/definitions/TurnId"
         },
-        "sessionId": {
-          "$ref": "#/definitions/SessionId"
-        },
-        "status": {
-          "$ref": "#/definitions/TurnStatus"
-        },
-        "createdAt": {
+        "disposition": {
           "type": "string",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
+          "enum": [
+            "started"
+          ]
         }
       },
       "required": [
-        "id",
-        "sessionId",
-        "status",
-        "createdAt",
-        "updatedAt"
+        "turnId",
+        "disposition"
       ],
-      "additionalProperties": false,
-      "title": "Turn.json"
-    },
-    "TurnStatus": {
-      "type": "string",
-      "enum": [
-        "running",
-        "completed",
-        "cancelled",
-        "failed"
-      ]
+      "additionalProperties": false
     },
     "TurnId": {
       "type": "string",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
       "format": "uuid"
     },
-    "StartTurn": {
+    "SendMessage": {
       "type": "object",
       "properties": {
-        "turnId": {
-          "$ref": "#/definitions/TurnId"
+        "messageId": {
+          "$ref": "#/definitions/MessageId"
         },
         "text": {
           "$ref": "#/definitions/MessageText"
         }
       },
       "required": [
-        "turnId",
+        "messageId",
         "text"
       ],
       "additionalProperties": false
@@ -189,6 +168,11 @@
     "MessageText": {
       "type": "string",
       "minLength": 1
+    },
+    "MessageId": {
+      "type": "string",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+      "format": "uuid"
     },
     "Offset": {
       "type": "string"

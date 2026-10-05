@@ -540,12 +540,12 @@
         }
       }
     },
-    "/sessions/{id}/turns": {
+    "/sessions/{id}/messages": {
       "post": {
         "tags": [
-          "turns"
+          "messages"
         ],
-        "operationId": "turns.start",
+        "operationId": "messages.send",
         "parameters": [
           {
             "name": "id",
@@ -559,11 +559,11 @@
         "security": [],
         "responses": {
           "202": {
-            "description": "Turn",
+            "description": "Delivery",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Turn"
+                  "$ref": "#/components/schemas/Delivery"
                 }
               }
             }
@@ -589,11 +589,11 @@
             }
           },
           "409": {
-            "description": "TurnInProgress",
+            "description": "SessionBusy",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TurnInProgress"
+                  "$ref": "#/components/schemas/SessionBusy"
                 }
               }
             }
@@ -606,7 +606,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/StartTurn"
+                "$ref": "#/components/schemas/SendMessage"
               }
             }
           },
@@ -617,9 +617,9 @@
     "/sessions/{id}/cancel": {
       "post": {
         "tags": [
-          "turns"
+          "messages"
         ],
-        "operationId": "turns.cancel",
+        "operationId": "messages.cancel",
         "parameters": [
           {
             "name": "id",
@@ -646,11 +646,11 @@
             }
           },
           "409": {
-            "description": "TurnNotRunning",
+            "description": "NothingToCancel",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TurnNotRunning"
+                  "$ref": "#/components/schemas/NothingToCancel"
                 }
               }
             }
@@ -726,13 +726,13 @@
         ],
         "additionalProperties": false
       },
-      "TurnNotRunning": {
+      "NothingToCancel": {
         "type": "object",
         "properties": {
           "_tag": {
             "type": "string",
             "enum": [
-              "TurnNotRunning"
+              "NothingToCancel"
             ]
           },
           "sessionId": {
@@ -750,13 +750,13 @@
         "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
         "format": "uuid"
       },
-      "TurnInProgress": {
+      "SessionBusy": {
         "type": "object",
         "properties": {
           "_tag": {
             "type": "string",
             "enum": [
-              "TurnInProgress"
+              "SessionBusy"
             ]
           },
           "sessionId": {
@@ -788,63 +788,42 @@
         ],
         "additionalProperties": false
       },
-      "Turn": {
+      "Delivery": {
         "type": "object",
         "properties": {
-          "id": {
+          "turnId": {
             "$ref": "#/components/schemas/TurnId"
           },
-          "sessionId": {
-            "$ref": "#/components/schemas/SessionId"
-          },
-          "status": {
-            "$ref": "#/components/schemas/TurnStatus"
-          },
-          "createdAt": {
+          "disposition": {
             "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
+            "enum": [
+              "started"
+            ]
           }
         },
         "required": [
-          "id",
-          "sessionId",
-          "status",
-          "createdAt",
-          "updatedAt"
+          "turnId",
+          "disposition"
         ],
-        "additionalProperties": false,
-        "title": "Turn.json"
-      },
-      "TurnStatus": {
-        "type": "string",
-        "enum": [
-          "running",
-          "completed",
-          "cancelled",
-          "failed"
-        ]
+        "additionalProperties": false
       },
       "TurnId": {
         "type": "string",
         "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
         "format": "uuid"
       },
-      "StartTurn": {
+      "SendMessage": {
         "type": "object",
         "properties": {
-          "turnId": {
-            "$ref": "#/components/schemas/TurnId"
+          "messageId": {
+            "$ref": "#/components/schemas/MessageId"
           },
           "text": {
             "$ref": "#/components/schemas/MessageText"
           }
         },
         "required": [
-          "turnId",
+          "messageId",
           "text"
         ],
         "additionalProperties": false
@@ -852,6 +831,11 @@
       "MessageText": {
         "type": "string",
         "minLength": 1
+      },
+      "MessageId": {
+        "type": "string",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+        "format": "uuid"
       },
       "Offset": {
         "type": "string"
@@ -1997,7 +1981,7 @@
       "name": "sessionStream"
     },
     {
-      "name": "turns"
+      "name": "messages"
     }
   ]
 }

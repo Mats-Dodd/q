@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use q::api::{ApiClient, ApiError, LiveUpdate};
 use q::transcript::Transcript;
-use q::wire::{IncomingChunk, Offset, SessionId, StartTurn, TurnEndReason, TurnId};
+use q::wire::{IncomingChunk, MessageId, Offset, SendMessage, SessionId, TurnEndReason, TurnId};
 use uuid::Uuid;
 
 fn api_client() -> ApiClient {
@@ -51,12 +51,14 @@ fn until(
     }
 }
 
-fn start_turn(api: &ApiClient, session: &SessionId, text: &str) -> Result<TurnId, ApiError> {
-    let message = StartTurn {
-        turn_id: TurnId(Uuid::now_v7()),
+/// Sends `text` as a new message, returning the turn it started.
+fn send(api: &ApiClient, session: &SessionId, text: &str) -> Result<TurnId, ApiError> {
+    let message = SendMessage {
+        message_id: MessageId(Uuid::now_v7()),
         text: text.try_into().unwrap(),
     };
-    api.start_turn(session, &message).map(|turn| turn.id)
+    api.send_message(session, &message)
+        .map(|delivery| delivery.turn_id)
 }
 
 #[test]
@@ -67,17 +69,17 @@ fn a_conversation_round_trip() {
     let stream = follow(&api, &session);
     let mut transcript = Transcript::default();
 
-    let first = start_turn(&api, &session, "hello from rust").expect("the turn to start");
+    let first = send(&api, &session, "hello from rust").expect("the turn to start");
     until(&mut transcript, &stream, |t| {
         t.turns()
             .last()
             .is_some_and(|turn| turn.id.0 == first.0 && turn.end.is_some())
     });
 
-    let slow = start_turn(&api, &session, "slow please").expect("the second turn to start");
-    let too_soon = start_turn(&api, &session, "too soon");
+    let slow = send(&api, &session, "slow please").expect("the second turn to start");
+    let too_soon = send(&api, &session, "too soon");
     assert!(
-        matches!(too_soon, Err(ApiError::Api { status: 409, tag: Some(ref tag) }) if tag == "TurnInProgress")
+        matches!(too_soon, Err(ApiError::Api { status: 409, tag: Some(ref tag) }) if tag == "SessionBusy")
     );
     until(&mut transcript, &stream, |t| {
         t.running().is_some_and(|turn| {

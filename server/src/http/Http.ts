@@ -6,7 +6,7 @@ import { ApiErrorsLive } from "./ApiErrorsLive.ts"
 import { SessionsHttp } from "./SessionsHttp.ts"
 import { SessionStreamHttp } from "./SessionStreamHttp.ts"
 import { SystemHttp } from "./SystemHttp.ts"
-import { TurnsHttp } from "./TurnsHttp.ts"
+import { MessagesHttp } from "./MessagesHttp.ts"
 
 /** Server-Sent Events must not be cached or buffered by proxies. */
 const SseNoCache = HttpRouter.middleware(
@@ -28,6 +28,6 @@ export const ApiLive = Layer.mergeAll(
   HttpApiScalar.layer(Api, { path: "/docs" }),
   SseNoCache
 ).pipe(
-  Layer.provide([SystemHttp, SessionsHttp, SessionStreamHttp, TurnsHttp]),
+  Layer.provide([SystemHttp, SessionsHttp, SessionStreamHttp, MessagesHttp]),
   Layer.provide(ApiErrorsLive)
 )

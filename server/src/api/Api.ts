@@ -3,7 +3,7 @@ import { ApiErrors } from "./ApiErrors.ts"
 import { SessionsApi } from "./SessionsApi.ts"
 import { SessionStreamApi } from "./SessionStreamApi.ts"
 import { SystemApi } from "./SystemApi.ts"
-import { TurnsApi } from "./TurnsApi.ts"
+import { MessagesApi } from "./MessagesApi.ts"
 
 /**
  * The server contract. Pure description: no handlers, no runtime dependencies.
@@ -11,6 +11,6 @@ import { TurnsApi } from "./TurnsApi.ts"
  * OpenAPI / JSON Schema generators.
  */
 export class Api extends HttpApi.make("q")
-  .add(SystemApi, SessionsApi, SessionStreamApi, TurnsApi)
+  .add(SystemApi, SessionsApi, SessionStreamApi, MessagesApi)
   .middleware(ApiErrors)
 {}

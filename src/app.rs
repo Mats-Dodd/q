@@ -22,7 +22,7 @@ use crate::picker::Picker;
 use crate::tea::{Cmd, Model, Subscription};
 use crate::transcript::Transcript;
 use crate::view::{self, Connection, Status};
-use crate::wire::{Offset, Session, SessionId, StartTurn, Turn, TurnId};
+use crate::wire::{Delivery, MessageId, Offset, SendMessage, Session, SessionId};
 
 /// Session titles are the first line of the first message, up to this many characters.
 const TITLE_LENGTH: usize = 60;
@@ -74,9 +74,9 @@ pub enum Msg {
         session: SessionId,
         update: LiveUpdate,
     },
-    TurnStartAnswered {
+    SendAnswered {
         text: String,
-        result: Result<Turn, ApiError>,
+        result: Result<Delivery, ApiError>,
     },
     CancelAnswered(Result<(), ApiError>),
 }
@@ -217,7 +217,7 @@ impl App {
         self.notice = None;
         self.scroll = None;
         match &self.current {
-            Current::Open { id, .. } => self.start_turn(id.clone(), text),
+            Current::Open { id, .. } => self.send_message(id.clone(), text),
             Current::New => {
                 self.current = Current::Creating;
                 let api = self.api.clone();
@@ -230,19 +230,19 @@ impl App {
         }
     }
 
-    fn start_turn(&mut self, session: SessionId, text: String) -> Cmd<Msg> {
+    fn send_message(&mut self, session: SessionId, text: String) -> Cmd<Msg> {
         let Ok(message) = text.clone().try_into() else {
             return Cmd::none();
         };
         self.sending = true;
-        let request = StartTurn {
-            turn_id: TurnId(Uuid::now_v7()),
+        let request = SendMessage {
+            message_id: MessageId(Uuid::now_v7()),
             text: message,
         };
         let api = self.api.clone();
-        Cmd::task(move || Msg::TurnStartAnswered {
+        Cmd::task(move || Msg::SendAnswered {
             text,
-            result: api.start_turn(&session, &request),
+            result: api.send_message(&session, &request),
         })
     }
 
@@ -283,7 +283,7 @@ impl App {
             Ok(session) => {
                 let id = session.id.clone();
                 let follow = self.open(session);
-                Cmd::batch([follow, self.start_turn(id, text)])
+                Cmd::batch([follow, self.send_message(id, text)])
             }
             Err(error) => {
                 self.current = Current::New;
@@ -493,7 +493,7 @@ impl Model for App {
                 self.live(&session, update);
                 Cmd::none()
             }
-            Msg::TurnStartAnswered { text, result } => {
+            Msg::SendAnswered { text, result } => {
                 self.sending = false;
                 if let Err(error) = result {
                     self.give_back(text, &error);
@@ -729,9 +729,9 @@ mod tests {
         let mut app = opened(&session("s"));
         let failure = Err(ApiError::Api {
             status: 409,
-            tag: Some("TurnInProgress".to_owned()),
+            tag: Some("SessionBusy".to_owned()),
         });
-        app.update(Msg::TurnStartAnswered {
+        app.update(Msg::SendAnswered {
             text: "hello".to_owned(),
             result: failure,
         });

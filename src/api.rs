@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 
 use crate::sse;
 use crate::wire::{
-    IncomingChunk, Offset, Session, SessionCreate, SessionId, StartTurn, StreamControl, Turn,
+    Delivery, IncomingChunk, Offset, SendMessage, Session, SessionCreate, SessionId, StreamControl,
 };
 
 /// Why a request failed.
@@ -29,8 +29,8 @@ impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ApiError::Api { tag: Some(tag), .. } => f.write_str(match tag.as_str() {
-                "TurnInProgress" => "a turn is already running",
-                "TurnNotRunning" => "no turn is running",
+                "SessionBusy" => "a turn is already running",
+                "NothingToCancel" => "no turn is running",
                 "SessionNotFound" => "no such session",
                 "RequestInvalid" => "the server rejected the request",
                 other => other,
@@ -120,19 +120,23 @@ impl ApiClient {
         self.post("/sessions", &SessionCreate { title })
     }
 
-    /// Starts a turn. Its progress arrives through [`ApiClient::follow_stream`].
+    /// Sends a message, starting a turn. Its progress arrives through [`ApiClient::follow_stream`].
     ///
     /// # Errors
-    /// `TurnInProgress` (409) while another turn runs, `SessionNotFound` (404),
+    /// `SessionBusy` (409) while a turn runs, `SessionNotFound` (404),
     /// or a transport error.
-    pub fn start_turn(&self, session: &SessionId, turn: &StartTurn) -> Result<Turn, ApiError> {
-        self.post(&format!("/sessions/{}/turns", session.0), turn)
+    pub fn send_message(
+        &self,
+        session: &SessionId,
+        message: &SendMessage,
+    ) -> Result<Delivery, ApiError> {
+        self.post(&format!("/sessions/{}/messages", session.0), message)
     }
 
     /// Cancels the session's running turn.
     ///
     /// # Errors
-    /// `TurnNotRunning` (409) when there is nothing to cancel, or a transport error.
+    /// `NothingToCancel` (409) when no turn is running, or a transport error.
     pub fn cancel_turn(&self, session: &SessionId) -> Result<(), ApiError> {
         let response = self
             .agent

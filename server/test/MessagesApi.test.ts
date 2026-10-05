@@ -6,9 +6,9 @@ import { RequestInvalid } from "../src/api/ApiErrors.ts"
 import { ApiClient } from "../src/client/ApiClient.ts"
 import * as Offset from "../src/domain/Offset.ts"
 import { SessionId, SessionNotFound } from "../src/domain/Session.ts"
-import { type TurnId, TurnInProgress, TurnNotRunning } from "../src/domain/Turn.ts"
+import { NothingToCancel, SessionBusy, type TurnId } from "../src/domain/Turn.ts"
 import { ServerTest } from "./support/ServerTest.ts"
-import { newTurnId } from "./support/Ids.ts"
+import { newMessageId } from "./support/Ids.ts"
 
 const BadRequest = Schema.Struct({ status: Schema.Literal(400), body: RequestInvalid })
 
@@ -33,53 +33,54 @@ const watchTurn = (id: SessionId, turnId: TurnId) =>
   })
 
 // Real time: the model streams in real time, over real HTTP.
-layer(ServerTest, { excludeTestServices: true })("Turns API", (it) => {
-  it.effect("send is accepted, and the reply arrives in the session's stream", () =>
+layer(ServerTest, { excludeTestServices: true })("Messages API", (it) => {
+  it.effect("a message is accepted, and the reply arrives in the session's stream", () =>
     Effect.gen(function*() {
       const client = yield* ApiClient
       const id = yield* newSession
-      const turnId = yield* newTurnId
 
-      const [turn, response] = yield* client.turns.start({
+      const [delivery, response] = yield* client.messages.send({
         params: { id },
-        payload: { turnId, text: "over the wire" },
+        payload: { messageId: yield* newMessageId, text: "over the wire" },
         responseMode: "decoded-and-response"
       })
       strictEqual(response.status, 202)
-      strictEqual(turn.id, turnId)
-      strictEqual(turn.status, "running")
+      strictEqual(delivery.disposition, "started")
 
-      const chunks = yield* watchTurn(id, turnId)
+      const chunks = yield* watchTurn(id, delivery.turnId)
       strictEqual(chunks.map((chunk) => chunk.type === "text-delta" ? chunk.delta : "").join(""), "Echo: over the wire")
-      deepStrictEqual(chunks.at(-1), { type: "data-turn-end", id: turnId, data: { reason: "completed" } })
+      deepStrictEqual(chunks.at(-1), { type: "data-turn-end", id: delivery.turnId, data: { reason: "completed" } })
     }))
 
-  it.effect("resending a turn returns it instead of starting another", () =>
+  it.effect("resending a message finds the turn it started instead of starting another", () =>
     Effect.gen(function*() {
       const client = yield* ApiClient
       const id = yield* newSession
-      const turnId = yield* newTurnId
-      const payload = { turnId, text: "slow and steady" }
-      const first = yield* client.turns.start({ params: { id }, payload })
-      const again = yield* client.turns.start({ params: { id }, payload })
-      strictEqual(again.id, first.id)
-      yield* client.turns.cancel({ params: { id } })
+      const payload = { messageId: yield* newMessageId, text: "slow and steady" }
+      const first = yield* client.messages.send({ params: { id }, payload })
+      const again = yield* client.messages.send({ params: { id }, payload })
+      strictEqual(again.turnId, first.turnId)
+      yield* client.messages.cancel({ params: { id } })
     }))
 
-  it.effect("a second turn while one runs is a 409, and cancel frees the session", () =>
+  it.effect("a message while a turn runs is a 409, and cancel frees the session", () =>
     Effect.gen(function*() {
       const client = yield* ApiClient
       const id = yield* newSession
-      const slow = yield* newTurnId
-      yield* client.turns.start({ params: { id }, payload: { turnId: slow, text: "slow please" } })
+      const slow = yield* client.messages.send({
+        params: { id },
+        payload: { messageId: yield* newMessageId, text: "slow please" }
+      })
 
-      const busy = yield* Effect.result(client.turns.start({ params: { id }, payload: { turnId: yield* newTurnId, text: "hi" } }))
-      assertFailure(busy, TurnInProgress.make({ sessionId: id }))
+      const busy = yield* Effect.result(
+        client.messages.send({ params: { id }, payload: { messageId: yield* newMessageId, text: "hi" } })
+      )
+      assertFailure(busy, SessionBusy.make({ sessionId: id }))
 
-      yield* client.turns.cancel({ params: { id } })
-      assertFailure(yield* Effect.result(client.turns.cancel({ params: { id } })), TurnNotRunning.make({ sessionId: id }))
-      const chunks = yield* watchTurn(id, slow)
-      deepStrictEqual(chunks.at(-1), { type: "data-turn-end", id: slow, data: { reason: "cancelled" } })
+      yield* client.messages.cancel({ params: { id } })
+      assertFailure(yield* Effect.result(client.messages.cancel({ params: { id } })), NothingToCancel.make({ sessionId: id }))
+      const chunks = yield* watchTurn(id, slow.turnId)
+      deepStrictEqual(chunks.at(-1), { type: "data-turn-end", id: slow.turnId, data: { reason: "cancelled" } })
     }))
 
   it.effect("unknown sessions are a typed 404", () =>
@@ -87,22 +88,22 @@ layer(ServerTest, { excludeTestServices: true })("Turns API", (it) => {
       const client = yield* ApiClient
       const missing = SessionId.make("00000000-0000-7000-8000-000000000000")
       const result = yield* Effect.result(
-        client.turns.start({ params: { id: missing }, payload: { turnId: yield* newTurnId, text: "anyone?" } })
+        client.messages.send({ params: { id: missing }, payload: { messageId: yield* newMessageId, text: "anyone?" } })
       )
       assertFailure(result, SessionNotFound.make({ id: missing }))
     }))
 
-  it.effect("empty messages and non-UUID turn ids are a 400", () =>
+  it.effect("empty messages and non-UUID message ids are a 400", () =>
     Effect.gen(function*() {
       const http = yield* HttpClient.HttpClient
       const id = yield* newSession
-      const turnId = yield* newTurnId
+      const messageId = yield* newMessageId
       const invalidAt = (payload: object) =>
-        http.execute(HttpClientRequest.post(`/sessions/${id}/turns`).pipe(HttpClientRequest.bodyJsonUnsafe(payload))).pipe(
+        http.execute(HttpClientRequest.post(`/sessions/${id}/messages`).pipe(HttpClientRequest.bodyJsonUnsafe(payload))).pipe(
           Effect.flatMap(HttpClientResponse.schemaJson(BadRequest)),
           Effect.map(({ body }) => body.issues.map((issue) => issue.path))
         )
-      deepStrictEqual(yield* invalidAt({ turnId, text: "" }), [["text"]])
-      deepStrictEqual(yield* invalidAt({ turnId: "not-a-uuid", text: "hi" }), [["turnId"]])
+      deepStrictEqual(yield* invalidAt({ messageId, text: "" }), [["text"]])
+      deepStrictEqual(yield* invalidAt({ messageId: "not-a-uuid", text: "hi" }), [["messageId"]])
     }))
 })

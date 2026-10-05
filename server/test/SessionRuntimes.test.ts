@@ -1,23 +1,32 @@
 import { BunServices } from "@effect/platform-bun"
 import { layer } from "@effect/vitest"
-import { assertEquals, assertFailure, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
-import { Context, DateTime, Effect, FileSystem, Layer, Path, Stream } from "effect"
-import { SqlClient } from "effect/sql"
+import { assertFailure, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
+import { Context, Effect, FileSystem, Layer, Path, Stream } from "effect"
 import * as Offset from "../src/domain/Offset.ts"
 import { SessionId, SessionNotFound } from "../src/domain/Session.ts"
 import type { StreamChunk } from "../src/domain/StreamChunk.ts"
-import { type TurnId, TurnInProgress, TurnNotRunning, type TurnStatus } from "../src/domain/Turn.ts"
+import { NothingToCancel, SessionBusy, type TurnId } from "../src/domain/Turn.ts"
+import { SessionEventLog } from "../src/services/SessionEventLog.ts"
 import { SessionRuntimes } from "../src/services/SessionRuntimes.ts"
 import { Sessions } from "../src/services/Sessions.ts"
 import { SessionStreams } from "../src/services/SessionStreams.ts"
 import { appTest, AppTest } from "./support/AppTest.ts"
+import { turnId as cutOffTurn, turnStarted } from "./support/Events.ts"
 import { FakeAnthropic, textOf } from "./support/FakeAnthropic.ts"
-import { newTurnId } from "./support/Ids.ts"
+import { newMessageId } from "./support/Ids.ts"
 
 const newSession = Effect.gen(function*() {
   const sessions = yield* Sessions
   return (yield* sessions.create({ title: "agent" })).id
 })
+
+/** Sends `text` as a new message, returning the turn it started. */
+const send = (sessionId: SessionId, text: string) =>
+  Effect.gen(function*() {
+    const runtimes = yield* SessionRuntimes
+    const delivery = yield* runtimes.sendMessage(sessionId, { messageId: yield* newMessageId, text })
+    return delivery.turnId
+  })
 
 /** The session's stream from the start until `turnId` ends. */
 const untilTurnEnds = (sessionId: SessionId, turnId: TurnId) =>
@@ -46,23 +55,12 @@ const replyText = (chunks: ReadonlyArray<StreamChunk>) =>
 
 const turnEndOf = (chunks: ReadonlyArray<StreamChunk>) => chunks.findLast((chunk) => chunk.type === "data-turn-end")
 
-const statusOf = (turnId: TurnId) =>
-  Effect.gen(function*() {
-    const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ readonly status: TurnStatus }>`SELECT status FROM turns WHERE id = ${turnId}`
-    return rows[0]?.status
-  })
-
 // Real time: the model streams in real time, over real HTTP.
 layer(AppTest, { excludeTestServices: true })("SessionRuntimes", (it) => {
   it.effect("a turn streams the user's message, then the model's reply, then its end", () =>
     Effect.gen(function*() {
-      const runtimes = yield* SessionRuntimes
       const sessionId = yield* newSession
-      const turnId = yield* newTurnId
-
-      const turn = yield* runtimes.startTurn(sessionId, { turnId, text: "hello there" })
-      strictEqual(turn.status, "running")
+      const turnId = yield* send(sessionId, "hello there")
       const chunks = yield* untilTurnEnds(sessionId, turnId)
 
       deepStrictEqual(chunks.map((chunk) => chunk.type), [
@@ -81,20 +79,14 @@ layer(AppTest, { excludeTestServices: true })("SessionRuntimes", (it) => {
       strictEqual(replyText(chunks), "Echo: hello there")
       deepStrictEqual(chunks.find((chunk) => chunk.type === "finish"), { type: "finish", finishReason: "stop" })
       deepStrictEqual(turnEndOf(chunks), { type: "data-turn-end", id: turnId, data: { reason: "completed" } })
-      strictEqual(yield* statusOf(turnId), "completed")
     }))
 
   it.effect("the model sees the whole conversation", () =>
     Effect.gen(function*() {
-      const runtimes = yield* SessionRuntimes
       const fake = yield* FakeAnthropic
       const sessionId = yield* newSession
-      const first = yield* newTurnId
-      yield* runtimes.startTurn(sessionId, { turnId: first, text: "one" })
-      yield* untilTurnEnds(sessionId, first)
-      const second = yield* newTurnId
-      yield* runtimes.startTurn(sessionId, { turnId: second, text: "two" })
-      yield* untilTurnEnds(sessionId, second)
+      yield* untilTurnEnds(sessionId, yield* send(sessionId, "one"))
+      yield* untilTurnEnds(sessionId, yield* send(sessionId, "two"))
 
       const prompt = (yield* fake.prompts).at(-1) ?? []
       deepStrictEqual(prompt.map((message) => [message.role, textOf(message)]), [
@@ -109,16 +101,11 @@ layer(AppTest, { excludeTestServices: true })("SessionRuntimes", (it) => {
       const runtimes = yield* SessionRuntimes
       const fake = yield* FakeAnthropic
       const sessionId = yield* newSession
-      const slow = yield* newTurnId
-      yield* runtimes.startTurn(sessionId, { turnId: slow, text: "slow please" })
+      yield* send(sessionId, "slow please")
       yield* untilReplying(sessionId)
-      yield* runtimes.cancelTurn(sessionId)
-      const failing = yield* newTurnId
-      yield* runtimes.startTurn(sessionId, { turnId: failing, text: "overloaded" })
-      yield* untilTurnEnds(sessionId, failing)
-      const last = yield* newTurnId
-      yield* runtimes.startTurn(sessionId, { turnId: last, text: "and now?" })
-      yield* untilTurnEnds(sessionId, last)
+      yield* runtimes.cancel(sessionId)
+      yield* untilTurnEnds(sessionId, yield* send(sessionId, "overloaded"))
+      yield* untilTurnEnds(sessionId, yield* send(sessionId, "and now?"))
 
       // The failed turn left no reply, so its message and the next reach the model
       // together (the provider merges consecutive user messages).
@@ -128,20 +115,20 @@ layer(AppTest, { excludeTestServices: true })("SessionRuntimes", (it) => {
       strictEqual(textOf(prompt[2] ?? { role: "", content: "" }), "overloadedand now?")
     }))
 
-  it.effect("sending the same turn again does not start it again", () =>
+  it.effect("sending the same message again does not start another turn", () =>
     Effect.gen(function*() {
       const runtimes = yield* SessionRuntimes
       const fake = yield* FakeAnthropic
       const sessionId = yield* newSession
-      const turnId = yield* newTurnId
+      const messageId = yield* newMessageId
       const promptsBefore = (yield* fake.prompts).length
 
-      const turn = yield* runtimes.startTurn(sessionId, { turnId, text: "once" })
-      const retried = yield* runtimes.startTurn(sessionId, { turnId, text: "once" })
-      strictEqual(retried.id, turn.id)
-      const chunks = yield* untilTurnEnds(sessionId, turnId)
-      // Retrying after it finished returns the finished turn.
-      strictEqual((yield* runtimes.startTurn(sessionId, { turnId, text: "once" })).status, "completed")
+      const first = yield* runtimes.sendMessage(sessionId, { messageId, text: "once" })
+      const retried = yield* runtimes.sendMessage(sessionId, { messageId, text: "once" })
+      strictEqual(retried.turnId, first.turnId)
+      const chunks = yield* untilTurnEnds(sessionId, first.turnId)
+      // Retrying after it finished still finds the turn it started.
+      strictEqual((yield* runtimes.sendMessage(sessionId, { messageId, text: "once" })).turnId, first.turnId)
 
       strictEqual(chunks.filter((chunk) => chunk.type === "data-user-message").length, 1)
       strictEqual((yield* fake.prompts).length, promptsBefore + 1)
@@ -151,63 +138,51 @@ layer(AppTest, { excludeTestServices: true })("SessionRuntimes", (it) => {
     Effect.gen(function*() {
       const runtimes = yield* SessionRuntimes
       const sessionId = yield* newSession
-      const slow = yield* newTurnId
-      yield* runtimes.startTurn(sessionId, { turnId: slow, text: "slow please" })
+      yield* send(sessionId, "slow please")
 
-      const second = yield* Effect.result(runtimes.startTurn(sessionId, { turnId: yield* newTurnId, text: "me too" }))
-      assertFailure(second, TurnInProgress.make({ sessionId }))
+      assertFailure(yield* Effect.result(send(sessionId, "me too")), SessionBusy.make({ sessionId }))
 
       // Other sessions are unaffected.
       const elsewhere = yield* newSession
-      const other = yield* newTurnId
-      yield* runtimes.startTurn(elsewhere, { turnId: other, text: "hi" })
-      yield* untilTurnEnds(elsewhere, other)
-      yield* runtimes.cancelTurn(sessionId)
+      yield* untilTurnEnds(elsewhere, yield* send(elsewhere, "hi"))
+      yield* runtimes.cancel(sessionId)
     }))
 
   it.effect("cancelling interrupts the model and records it", () =>
     Effect.gen(function*() {
       const runtimes = yield* SessionRuntimes
       const sessionId = yield* newSession
-      const turnId = yield* newTurnId
-      yield* runtimes.startTurn(sessionId, { turnId, text: "slow please" })
+      const turnId = yield* send(sessionId, "slow please")
       yield* untilReplying(sessionId)
 
-      yield* runtimes.cancelTurn(sessionId)
+      yield* runtimes.cancel(sessionId)
       const chunks = yield* untilTurnEnds(sessionId, turnId)
       deepStrictEqual(chunks.slice(-2), [
         { type: "abort", reason: "cancelled" },
         { type: "data-turn-end", id: turnId, data: { reason: "cancelled" } }
       ])
       assertTrue(replyText(chunks).length < 40, "the reply was cut short")
-      strictEqual(yield* statusOf(turnId), "cancelled")
 
-      assertFailure(yield* Effect.result(runtimes.cancelTurn(sessionId)), TurnNotRunning.make({ sessionId }))
+      assertFailure(yield* Effect.result(runtimes.cancel(sessionId)), NothingToCancel.make({ sessionId }))
       // The session is free again.
-      const next = yield* newTurnId
-      yield* runtimes.startTurn(sessionId, { turnId: next, text: "again" })
+      const next = yield* send(sessionId, "again")
       strictEqual(turnEndOf(yield* untilTurnEnds(sessionId, next))?.type, "data-turn-end")
     }))
 
   it.effect("a model that fails before replying fails the turn", () =>
     Effect.gen(function*() {
-      const runtimes = yield* SessionRuntimes
       const sessionId = yield* newSession
-      const turnId = yield* newTurnId
-      yield* runtimes.startTurn(sessionId, { turnId, text: "overloaded" })
+      const turnId = yield* send(sessionId, "overloaded")
       const chunks = yield* untilTurnEnds(sessionId, turnId)
 
       strictEqual(chunks.at(-2)?.type, "error")
       deepStrictEqual(turnEndOf(chunks), { type: "data-turn-end", id: turnId, data: { reason: "failed" } })
-      strictEqual(yield* statusOf(turnId), "failed")
     }))
 
   it.effect("a model that fails mid-reply keeps what it said and fails the turn", () =>
     Effect.gen(function*() {
-      const runtimes = yield* SessionRuntimes
       const sessionId = yield* newSession
-      const turnId = yield* newTurnId
-      yield* runtimes.startTurn(sessionId, { turnId, text: "fail now" })
+      const turnId = yield* send(sessionId, "fail now")
       const chunks = yield* untilTurnEnds(sessionId, turnId)
 
       strictEqual(replyText(chunks), "Partial")
@@ -215,48 +190,36 @@ layer(AppTest, { excludeTestServices: true })("SessionRuntimes", (it) => {
       deepStrictEqual(turnEndOf(chunks), { type: "data-turn-end", id: turnId, data: { reason: "failed" } })
     }))
 
-  it.effect("unknown sessions fail before anything is written", () =>
+  it.effect("unknown sessions are refused", () =>
     Effect.gen(function*() {
-      const runtimes = yield* SessionRuntimes
       const missing = SessionId.make("00000000-0000-7000-8000-000000000000")
-      const turnId = yield* newTurnId
-      assertFailure(
-        yield* Effect.result(runtimes.startTurn(missing, { turnId, text: "hello?" })),
-        SessionNotFound.make({ id: missing })
-      )
-      strictEqual(yield* statusOf(turnId), undefined)
+      assertFailure(yield* Effect.result(send(missing, "hello?")), SessionNotFound.make({ id: missing }))
     }))
 })
 
 layer(BunServices.layer, { excludeTestServices: true })("SessionRuntimes across restarts", (it) => {
-  it.effect("turns cut off mid-run are recorded as failed on the next start", () =>
+  it.effect("a turn cut off mid-run is recorded as failed on the next start", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const dir = yield* fs.makeTempDirectoryScoped()
       const app = () => appTest({ Q_DB_PATH: path.join(dir, "q.db") })
 
-      // A run that dies with a turn in flight: its row says `running`, its stream has no end.
-      const { sessionId, turnId } = yield* Effect.scoped(Effect.gen(function*() {
+      // A run that dies mid-turn: the turn started, and never ended.
+      const sessionId = yield* Effect.scoped(Effect.gen(function*() {
         const context = yield* Layer.build(app())
-        const sql = Context.get(context, SqlClient.SqlClient)
         const session = yield* Context.get(context, Sessions).create({ title: "crash" })
-        const inFlight = yield* newTurnId
-        const now = DateTime.formatIso(yield* DateTime.now)
-        yield* sql`INSERT INTO turns (id, session_id, status, created_at, updated_at)
-          VALUES (${inFlight}, ${session.id}, 'running', ${now}, ${now})`
-        return { sessionId: session.id, turnId: inFlight }
+        yield* Context.get(context, SessionEventLog).append(session.id, 0, [turnStarted("hi")])
+        return session.id
       }))
 
       yield* Effect.scoped(Effect.gen(function*() {
         const context = yield* Layer.build(app())
-        const streams = Context.get(context, SessionStreams)
-        const sql = Context.get(context, SqlClient.SqlClient)
-        const { chunks } = yield* streams.catchUp(sessionId, Offset.beginning)
-        deepStrictEqual(turnEndOf(chunks), { type: "data-turn-end", id: turnId, data: { reason: "failed" } })
-        deepStrictEqual(chunks.at(-2), { type: "error", errorText: "The server stopped during this turn" })
-        const rows = yield* sql<{ readonly status: string }>`SELECT status FROM turns WHERE id = ${turnId}`
-        assertEquals(rows[0]?.status, "failed")
+        const { chunks } = yield* Context.get(context, SessionStreams).catchUp(sessionId, Offset.beginning)
+        deepStrictEqual(chunks.slice(-2), [
+          { type: "error", errorText: "The server stopped during this turn" },
+          { type: "data-turn-end", id: cutOffTurn, data: { reason: "failed" } }
+        ])
       }))
     }))
 
@@ -270,17 +233,15 @@ layer(BunServices.layer, { excludeTestServices: true })("SessionRuntimes across 
       const sessionId = yield* Effect.scoped(Effect.gen(function*() {
         const context = yield* Layer.build(app())
         const session = yield* Context.get(context, Sessions).create({ title: "memory" })
-        const turnId = yield* newTurnId
-        yield* Context.get(context, SessionRuntimes).startTurn(session.id, { turnId, text: "remember me" })
-        yield* untilTurnEnds(session.id, turnId).pipe(Effect.provideService(SessionStreams, Context.get(context, SessionStreams)))
+        const turnId = yield* send(session.id, "remember me").pipe(Effect.provideContext(context))
+        yield* untilTurnEnds(session.id, turnId).pipe(Effect.provideContext(context))
         return session.id
       }))
 
       yield* Effect.scoped(Effect.gen(function*() {
         const context = yield* Layer.build(app())
-        const turnId = yield* newTurnId
-        yield* Context.get(context, SessionRuntimes).startTurn(sessionId, { turnId, text: "do you?" })
-        yield* untilTurnEnds(sessionId, turnId).pipe(Effect.provideService(SessionStreams, Context.get(context, SessionStreams)))
+        const turnId = yield* send(sessionId, "do you?").pipe(Effect.provideContext(context))
+        yield* untilTurnEnds(sessionId, turnId).pipe(Effect.provideContext(context))
         const prompt = (yield* Context.get(context, FakeAnthropic).prompts).at(-1) ?? []
         deepStrictEqual(prompt.map((message) => [message.role, textOf(message)]), [
           ["user", "remember me"],
